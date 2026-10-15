@@ -15,7 +15,7 @@ DartKDS is a lightweight, self-hosted **Kitchen Display System (KDS)** designed 
 
 | Order Intake (Host) |        Kitchen Display (Client)        |
 | :---: |:--------------------------------------:|
-| ![Intake](flutter_01.png) |            ![KDS](Icon.png)            |
+| ![Intake](OrderIntakeScreenshot.jpg) |            ![KDS](Icon.png)            |
 | *Modern, intuitive order entry* | *High-contrast, actionable prep lists* |
 
 ---
