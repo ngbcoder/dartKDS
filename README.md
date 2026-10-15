@@ -57,6 +57,7 @@ Launch DartKDS on your main tablet and select **Primary Host**. This device beco
 Launch the app on other devices and select **Client**. 
 - **Easy Pairing:** Tap "Scan QR Code" on the client and point it at the Host's pairing code in Settings.
 - **Auto-Discovery:** Clients will automatically find the Host if they are on the same Wi-Fi network.
+- **TV Mode** A special mode for when connected to a TV. (**In Progress**)
 
 ### 3. External Orders (Optional)
 Connect your **Square POS** to the Host's webhook endpoint (`/api/webhooks/square`) to sync sales automatically.
