@@ -24,23 +24,27 @@ class IntakeItem {
 class IntakeState {
   final List<IntakeItem> items;
   final String customerName;
+  final String orderNote;
   final String? editingOrderUuid;
 
   IntakeState({
     this.items = const [],
     this.customerName = '',
+    this.orderNote = '',
     this.editingOrderUuid,
   });
 
   IntakeState copyWith({
     List<IntakeItem>? items,
     String? customerName,
+    String? orderNote,
     String? editingOrderUuid,
     bool clearEditing = false,
   }) {
     return IntakeState(
       items: items ?? this.items,
       customerName: customerName ?? this.customerName,
+      orderNote: orderNote ?? this.orderNote,
       editingOrderUuid: clearEditing ? null : (editingOrderUuid ?? this.editingOrderUuid),
     );
   }
@@ -79,6 +83,10 @@ class IntakeNotifier extends StateNotifier<IntakeState> {
 
   void setCustomerName(String name) {
     state = state.copyWith(customerName: name);
+  }
+
+  void setOrderNote(String note) {
+    state = state.copyWith(orderNote: note);
   }
 
   void clear() {

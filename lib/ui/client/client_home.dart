@@ -907,6 +907,19 @@ class _ClientHomeState extends ConsumerState<ClientHome>
               ),
               const SizedBox(width: 16),
               IconButton(
+                tooltip: 'Toggle theme',
+                icon: Icon(
+                  isDark ? Icons.light_mode : Icons.dark_mode,
+                  color: textColor,
+                  size: 20,
+                ),
+                onPressed: () {
+                  final currentMode = ref.read(settingsProvider).themeMode;
+                  final newMode = currentMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+                  ref.read(settingsProvider.notifier).setThemeMode(newMode);
+                },
+              ),
+              IconButton(
                 icon: Icon(Icons.history, color: textColor, size: 20),
                 onPressed: () => _showRecentBumpsDialog(),
               ),

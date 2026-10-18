@@ -223,13 +223,16 @@ class _HostHomeState extends ConsumerState<HostHome> {
               ),
             ),
             const SizedBox(width: 12),
-            Text(
-              currentIndex == 0
-                  ? 'TERMINAL'
-                  : (currentIndex == 1
-                        ? 'HISTORY'
-                        : (currentIndex == 2 ? 'STOCK' : 'SYSTEM')),
-              style: const TextStyle(letterSpacing: 1.5, fontSize: 13),
+            Expanded(
+              child: Text(
+                currentIndex == 0
+                    ? 'TERMINAL'
+                    : (currentIndex == 1
+                          ? 'HISTORY'
+                          : (currentIndex == 2 ? 'STOCK' : 'SYSTEM')),
+                style: const TextStyle(letterSpacing: 1.5, fontSize: 13),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -240,6 +243,20 @@ class _HostHomeState extends ConsumerState<HostHome> {
               icon: const Icon(Icons.swap_horiz_rounded, size: 18),
               onPressed: () => _confirmSwitchRole(),
             ),
+          IconButton(
+            tooltip: 'Toggle theme',
+            icon: Icon(
+              theme.brightness == Brightness.dark
+                  ? Icons.light_mode_rounded
+                  : Icons.dark_mode_rounded,
+              size: 18,
+            ),
+            onPressed: () {
+              final currentMode = ref.read(settingsProvider).themeMode;
+              final newMode = currentMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+              ref.read(settingsProvider.notifier).setThemeMode(newMode);
+            },
+          ),
           Row(
             children: [
               Text(

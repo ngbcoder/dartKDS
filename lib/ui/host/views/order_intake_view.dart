@@ -669,6 +669,22 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: TextField(
+              controller: TextEditingController(text: intakeState.orderNote)
+                ..selection = TextSelection.collapsed(offset: intakeState.orderNote.length),
+              onChanged: (val) => ref.read(intakeProvider.notifier).setOrderNote(val),
+              style: const TextStyle(fontSize: 12),
+              decoration: InputDecoration(
+                hintText: 'Special instructions / order note...',
+                hintStyle: TextStyle(color: theme.hintColor, fontSize: 11),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: theme.dividerColor)),
+              ),
+            ),
+          ),
           const Divider(height: 1),
           Expanded(
             child: ListView.separated(
@@ -681,13 +697,7 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
                   visualDensity: VisualDensity.compact,
-                  leading: Text(
-                    '${item.quantity}×',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 14,
-                    ),
-                  ),
+                  leading: const SizedBox.shrink(),
                   title: Text(
                     item.menuItem.name,
                     style: const TextStyle(
@@ -707,17 +717,35 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline, size: 16),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () {
+                          if (item.quantity > 1) {
+                            ref.read(intakeProvider.notifier).updateItem(index, quantity: item.quantity - 1);
+                          } else {
+                            ref.read(intakeProvider.notifier).removeItem(index);
+                          }
+                        },
+                      ),
                       Text(
-                        '\$${(((item.menuItem.price + item.selectedModifiers.fold(0.0, (sum, m) => sum + parseModifierPrice(m))) * item.quantity)).toStringAsFixed(2)}',
-                        style: const TextStyle(fontWeight: FontWeight.w800),
+                        '${item.quantity}',
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle_outline, size: 16),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () {
+                          ref.read(intakeProvider.notifier).updateItem(index, quantity: item.quantity + 1);
+                        },
                       ),
                       const SizedBox(width: 4),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 16),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () =>
-                            ref.read(intakeProvider.notifier).removeItem(index),
+                      Text(
+                        '\$${(((item.menuItem.price + item.selectedModifiers.fold(0.0, (sum, m) => sum + parseModifierPrice(m))) * item.quantity)).toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
                       ),
+                    ],
+                  ),
                     ],
                   ),
                   onTap: () => _showModifierDialog(
@@ -1391,7 +1419,8 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
 
     final isEditing = state.editingOrderUuid != null;
     final orderUuid = state.editingOrderUuid ?? const Uuid().v4();
-    final orderName = state.customerName.isEmpty ? 'Guest' : state.customerName;
+    final baseName = state.customerName.isEmpty ? 'Guest' : state.customerName;
+    final orderName = state.orderNote.isNotEmpty ? '$baseName (${state.orderNote})' : baseName;
 
     // Stock decrements, order edits and the kitchen broadcast all live behind
     // the store, so this is identical on a native host and in a browser.
