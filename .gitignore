@@ -52,3 +52,6 @@ app.*.map.json
 # Gradle build reports (regenerated on every build)
 /android/build/
 
+# Kotlin compiler session state, written by the Gradle daemon on every build.
+/android/.kotlin/
+

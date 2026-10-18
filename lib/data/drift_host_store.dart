@@ -57,18 +57,19 @@ class DriftHostStore implements HostStore {
     // rather than exposing a stream, so bridge it to one here. Polling instead
     // would start a fresh timer on every StreamBuilder resubscription.
     return Stream<List<ConnectedClient>>.multi((controller) {
-      void emit() {
+      final listener = () {
         if (!controller.isClosed) controller.add(server.connectedClients);
-      }
-
-      final previous = server.onClientsChanged;
-      server.onClientsChanged = () {
-        previous?.call();
-        emit();
       };
-      controller.onCancel = () => server.onClientsChanged = previous;
 
-      emit();
+      // Registers/unregisters symmetrically. This used to chain into a single
+      // shared `onClientsChanged` field and restore the captured `previous` on
+      // cancel — so if this listener left before another subscriber's, the
+      // restore threw the other subscriber's wrapper away and it silently
+      // stopped updating.
+      server.addClientListener(listener);
+      controller.onCancel = () => server.removeClientListener(listener);
+
+      listener();
     });
   }
 

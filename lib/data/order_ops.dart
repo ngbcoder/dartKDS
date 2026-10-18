@@ -100,7 +100,7 @@ Future<Map<String, dynamic>> _submitOrderInTransaction({
           db.menuItems,
         )..where((t) => t.id.equals(fresh.id))).write(
           MenuItemsCompanion(
-            // Clamp: a webhook, a recall or a hand-edited tab can otherwise
+            // Clamp: a recall, a re-send or a hand-edited tab can otherwise
             // drive tracked stock negative and the low-stock view goes wrong.
             stockQuantity: drift.Value(
               (fresh.stockQuantity - line.quantity).clamp(0, 1 << 31),

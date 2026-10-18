@@ -462,9 +462,7 @@ class _ClientHomeState extends ConsumerState<ClientHome>
             // `system` no longer paints a light board on a display set to dark.
             backgroundColor: settings.clientHighContrast
                 ? Colors.black
-                : (isDark
-                      ? const Color(0xFF030712)
-                      : Colors.white),
+                : (isDark ? const Color(0xFF030712) : Colors.white),
             body: Column(
               children: [
                 _buildHeader(stationTag, timeFormat, settings),
@@ -915,7 +913,9 @@ class _ClientHomeState extends ConsumerState<ClientHome>
                 ),
                 onPressed: () {
                   final currentMode = ref.read(settingsProvider).themeMode;
-                  final newMode = currentMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+                  final newMode = currentMode == ThemeMode.dark
+                      ? ThemeMode.light
+                      : ThemeMode.dark;
                   ref.read(settingsProvider.notifier).setThemeMode(newMode);
                 },
               ),
@@ -960,7 +960,9 @@ class _ClientHomeState extends ConsumerState<ClientHome>
             content: recent.isEmpty
                 ? Text(
                     'No recent bumps',
-                    style: TextStyle(color: isLight ? Colors.black54 : Colors.grey),
+                    style: TextStyle(
+                      color: isLight ? Colors.black54 : Colors.grey,
+                    ),
                   )
                 : SizedBox(
                     width: 400,
@@ -979,7 +981,9 @@ class _ClientHomeState extends ConsumerState<ClientHome>
                           ),
                           subtitle: Text(
                             DateFormat('HH:mm:ss').format(order.timestamp),
-                            style: TextStyle(color: isLight ? Colors.black54 : Colors.grey),
+                            style: TextStyle(
+                              color: isLight ? Colors.black54 : Colors.grey,
+                            ),
                           ),
                           trailing: ElevatedButton(
                             style: ElevatedButton.styleFrom(
@@ -1367,8 +1371,7 @@ class _ClientHomeState extends ConsumerState<ClientHome>
     );
     final settings = ref.read(settingsProvider);
     final isLight =
-        settings.themeMode == ThemeMode.light &&
-        !settings.clientHighContrast;
+        settings.themeMode == ThemeMode.light && !settings.clientHighContrast;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1414,8 +1417,7 @@ class _ClientHomeState extends ConsumerState<ClientHome>
     final portController = TextEditingController(text: '8080');
     final settings = ref.read(settingsProvider);
     final isLight =
-        settings.themeMode == ThemeMode.light &&
-        !settings.clientHighContrast;
+        settings.themeMode == ThemeMode.light && !settings.clientHighContrast;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1435,7 +1437,9 @@ class _ClientHomeState extends ConsumerState<ClientHome>
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
               decoration: InputDecoration(
                 hintText: 'HOST IP ADDRESS',
-                hintStyle: TextStyle(color: isLight ? Colors.black45 : Colors.grey),
+                hintStyle: TextStyle(
+                  color: isLight ? Colors.black45 : Colors.grey,
+                ),
               ),
             ),
             const SizedBox(height: 12),
@@ -1445,7 +1449,9 @@ class _ClientHomeState extends ConsumerState<ClientHome>
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
                 hintText: 'PORT (8080)',
-                hintStyle: TextStyle(color: isLight ? Colors.black45 : Colors.grey),
+                hintStyle: TextStyle(
+                  color: isLight ? Colors.black45 : Colors.grey,
+                ),
               ),
             ),
           ],
@@ -1599,29 +1605,15 @@ class _TicketCardState extends ConsumerState<_TicketCard> {
                     Expanded(
                       child: Row(
                         children: [
-                          if (order.customerName.startsWith('SQ:'))
-                            Container(
-                              margin: const EdgeInsets.only(right: 6),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF10B981),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text(
-                                'SQ',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
+                          // The green `SQ` badge that used to sit here keyed off
+                          // the `SQ:` prefix the Square webhook stamped onto
+                          // customer names. With that integration removed
+                          // nothing can produce the prefix any more, so the
+                          // badge could never render and the
+                          // `replaceFirst('SQ: ', '')` below was dead weight.
                           Expanded(
                             child: Text(
-                              '#${order.uuid.substring(0, 4).toUpperCase()}${isRushMode ? "" : " • ${order.customerName.replaceFirst('SQ: ', '').toUpperCase()}"}',
+                              '#${order.uuid.substring(0, 4).toUpperCase()}${isRushMode ? "" : " • ${order.customerName.toUpperCase()}"}',
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: isDark

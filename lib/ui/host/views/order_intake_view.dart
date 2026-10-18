@@ -37,6 +37,27 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
   bool _filtersExpanded = false;
   Timer? _searchDebounce;
 
+  /// Held for the lifetime of the view rather than built inline. Creating a
+  /// `TextEditingController` inside `build` gave every rebuild a fresh
+  /// controller seeded from provider state, and since every keystroke writes
+  /// through `onChanged` and therefore rebuilds, the caret was thrown back to
+  /// the end of the field after each character — typing into the middle of a
+  /// guest name was impossible. It also leaked one controller per rebuild.
+  final TextEditingController _customerNameController = TextEditingController();
+  final TextEditingController _orderNoteController = TextEditingController();
+
+  /// Pushes provider state into the fields only when the two actually differ,
+  /// so externally-driven changes (`loadOrder`, `clear`) still land without
+  /// disturbing the caret while the user is typing.
+  void _syncField(TextEditingController controller, String value) {
+    if (controller.text != value) {
+      controller.value = TextEditingValue(
+        text: value,
+        selection: TextSelection.collapsed(offset: value.length),
+      );
+    }
+  }
+
   /// Restores the old phone behaviour, where the order summary was laid over
   /// the menu instead of beside it. Kept so a regression test can assert that
   /// the sheet really does cover the menu when this is on — otherwise "the menu
@@ -57,6 +78,8 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
   void dispose() {
     _confettiController.dispose();
     _searchDebounce?.cancel();
+    _customerNameController.dispose();
+    _orderNoteController.dispose();
     super.dispose();
   }
 
@@ -186,6 +209,12 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
           ),
           child: Column(
             children: [
+              // Not `Expanded`. This Column lives inside a Container with no
+              // fixed height, so it is laid out with unbounded height and a
+              // flex child is invalid there. The search field and the FILTERS
+              // button are also stacked vertically, so they never compete for
+              // width — the field needs no flex. See the FILTERS row below for
+              // where the real horizontal overflow was.
               TextField(
                 onChanged: (val) {
                   _searchDebounce?.cancel();
@@ -229,36 +258,51 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
                     children: [
                       Icon(Icons.tune, size: 14, color: theme.hintColor),
                       const SizedBox(width: 6),
-                      Text(
-                        _filtersExpanded ? 'HIDE FILTERS' : 'FILTERS',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          color: theme.hintColor,
-                          letterSpacing: 0.5,
+                      // This is the row that actually overflowed on a 360px
+                      // phone — not the search field, which sits above it and
+                      // never competes for width. `HIDE FILTERS` plus the
+                      // active-filter badge plus the sort dropdown did not fit
+                      // in the 328px the header leaves, and the caret at the end
+                      // was clipped off the right edge. The label and the badge
+                      // are the only children that can grow, so they are the
+                      // ones made shrinkable; the `Spacer` and the dropdown keep
+                      // their natural size.
+                      Flexible(
+                        child: Text(
+                          _filtersExpanded ? 'HIDE FILTERS' : 'FILTERS',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: theme.hintColor,
+                            letterSpacing: 0.5,
+                          ),
                         ),
                       ),
                       if (!_filtersExpanded &&
                           (_selectedCategory != 'ALL' ||
                               _selectedTag != 'ALL')) ...[
                         const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.primary.withValues(
-                              alpha: 0.1,
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
                             ),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            '$_selectedCategory${_selectedTag != 'ALL' ? ' · $_selectedTag' : ''}',
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              color: theme.colorScheme.primary,
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary.withValues(
+                                alpha: 0.1,
+                              ),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '$_selectedCategory${_selectedTag != 'ALL' ? ' · $_selectedTag' : ''}',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                color: theme.colorScheme.primary,
+                              ),
                             ),
                           ),
                         ),
@@ -274,11 +318,26 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
                           color: theme.colorScheme.onSurface,
                         ),
                         items: const [
-                          DropdownMenuItem(value: 'name', child: Text('Sort: Name')),
-                          DropdownMenuItem(value: 'price_asc', child: Text(r'Sort: Price ($–$$)')),
-                          DropdownMenuItem(value: 'price_desc', child: Text(r'Sort: Price ($$$–$)')),
-                          DropdownMenuItem(value: 'category', child: Text('Sort: Category')),
-                          DropdownMenuItem(value: 'station', child: Text('Sort: Station')),
+                          DropdownMenuItem(
+                            value: 'name',
+                            child: Text('Sort: Name'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'price_asc',
+                            child: Text(r'Sort: Price ($–$$)'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'price_desc',
+                            child: Text(r'Sort: Price ($$$–$)'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'category',
+                            child: Text('Sort: Category'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'station',
+                            child: Text('Sort: Station'),
+                          ),
                         ],
                         onChanged: (val) {
                           if (val != null) setState(() => _sortBy = val);
@@ -361,7 +420,10 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
               final sortedItems = [...items];
               switch (_sortBy) {
                 case 'name':
-                  sortedItems.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+                  sortedItems.sort(
+                    (a, b) =>
+                        a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+                  );
                   break;
                 case 'price_asc':
                   sortedItems.sort((a, b) => a.price.compareTo(b.price));
@@ -370,10 +432,18 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
                   sortedItems.sort((a, b) => b.price.compareTo(a.price));
                   break;
                 case 'category':
-                  sortedItems.sort((a, b) => a.category.toLowerCase().compareTo(b.category.toLowerCase()));
+                  sortedItems.sort(
+                    (a, b) => a.category.toLowerCase().compareTo(
+                      b.category.toLowerCase(),
+                    ),
+                  );
                   break;
                 case 'station':
-                  sortedItems.sort((a, b) => a.defaultStation.toLowerCase().compareTo(b.defaultStation.toLowerCase()));
+                  sortedItems.sort(
+                    (a, b) => a.defaultStation.toLowerCase().compareTo(
+                      b.defaultStation.toLowerCase(),
+                    ),
+                  );
                   break;
               }
 
@@ -531,6 +601,9 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
     final intakeState = ref.watch(intakeProvider);
     final theme = Theme.of(context);
 
+    _syncField(_customerNameController, intakeState.customerName);
+    _syncField(_orderNoteController, intakeState.orderNote);
+
     final isEditingOrder = intakeState.editingOrderUuid != null;
     final cartTotal = _cartTotal(intakeState);
 
@@ -538,226 +611,288 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
       color: theme.cardColor,
       child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: isEditingOrder
-                  ? theme.colorScheme.primary.withValues(alpha: 0.1)
-                  : theme.dividerColor.withValues(alpha: 0.1),
-              border: Border(bottom: BorderSide(color: theme.dividerColor)),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.receipt_long_rounded,
-                  size: 16,
-                  color: isEditingOrder
-                      ? theme.colorScheme.primary
-                      : theme.hintColor,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller:
-                        TextEditingController(text: intakeState.customerName)
-                          ..selection = TextSelection.collapsed(
-                            offset: intakeState.customerName.length,
-                          ),
-                    onChanged: (val) =>
-                        ref.read(intakeProvider.notifier).setCustomerName(val),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 14,
-                      letterSpacing: 0.5,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'GUEST / ORDER NAME',
-                      hintStyle: TextStyle(
-                        color: theme.hintColor,
-                        fontWeight: FontWeight.normal,
-                        fontSize: 12,
-                      ),
-                      isDense: true,
-                      border: InputBorder.none,
-                    ),
-                  ),
-                ),
-                if (isEditingOrder)
+          // Everything above the send button now scrolls as one unit, with the
+          // button pinned. Previously the header, the ITEMS count row and the
+          // order-note field were rigid and only the item list had an
+          // `Expanded`, so on a short screen the fixed chrome alone exceeded
+          // the sheet's height: the list was squeezed to zero and the Column
+          // overflowed by ~20px. `_bottomSheetHeight` cannot rescue that — it
+          // hands out `screenHeight * 0.4`, which on a 560px phone is 224px,
+          // less than the chrome needs. Letting the whole ticket region scroll
+          // removes the assumption that the chrome always fits, while the
+          // button stays visible and tappable, which is the one thing that
+          // must never scroll away.
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
+                      horizontal: 16,
+                      vertical: 10,
                     ),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      'EDITING',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 10,
-                        color: theme.colorScheme.primary,
+                      color: isEditingOrder
+                          ? theme.colorScheme.primary.withValues(alpha: 0.1)
+                          : theme.dividerColor.withValues(alpha: 0.1),
+                      border: Border(
+                        bottom: BorderSide(color: theme.dividerColor),
                       ),
                     ),
-                  ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'ITEMS (${intakeState.items.length})',
-                  style: theme.textTheme.labelLarge,
-                ),
-                TextButton(
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text(
-                          'CLEAR TICKET?',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 16,
-                          ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.receipt_long_rounded,
+                          size: 16,
+                          color: isEditingOrder
+                              ? theme.colorScheme.primary
+                              : theme.hintColor,
                         ),
-                        content: const Text(
-                          'This will clear items from the current view.',
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text(
-                              'CANCEL',
-                              style: TextStyle(fontWeight: FontWeight.w800),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _customerNameController,
+                            onChanged: (val) => ref
+                                .read(intakeProvider.notifier)
+                                .setCustomerName(val),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 14,
+                              letterSpacing: 0.5,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'GUEST / ORDER NAME',
+                              hintStyle: TextStyle(
+                                color: theme.hintColor,
+                                fontWeight: FontWeight.normal,
+                                fontSize: 12,
+                              ),
+                              isDense: true,
+                              border: InputBorder.none,
                             ),
                           ),
-                          TextButton(
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              ref.read(intakeProvider.notifier).clear();
-                              if (!context.mounted) return;
-                            },
-                            child: const Text(
-                              'CLEAR',
+                        ),
+                        if (isEditingOrder)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary.withValues(
+                                alpha: 0.15,
+                              ),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'EDITING',
                               style: TextStyle(
-                                color: Colors.red,
                                 fontWeight: FontWeight.w900,
+                                fontSize: 10,
+                                color: theme.colorScheme.primary,
                               ),
                             ),
                           ),
-                        ],
-                      ),
-                    );
-                  },
-                  child: const Text(
-                    'CLEAR',
-                    style: TextStyle(
-                      color: Colors.red,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 11,
+                      ],
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: TextField(
-              controller: TextEditingController(text: intakeState.orderNote)
-                ..selection = TextSelection.collapsed(offset: intakeState.orderNote.length),
-              onChanged: (val) => ref.read(intakeProvider.notifier).setOrderNote(val),
-              style: const TextStyle(fontSize: 12),
-              decoration: InputDecoration(
-                hintText: 'Special instructions / order note...',
-                hintStyle: TextStyle(color: theme.hintColor, fontSize: 11),
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: theme.dividerColor)),
-              ),
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: intakeState.items.length,
-              separatorBuilder: (context, index) =>
-                  Divider(color: theme.dividerColor, height: 1),
-              itemBuilder: (context, index) {
-                final item = intakeState.items[index];
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  leading: const SizedBox.shrink(),
-                  title: Text(
-                    item.menuItem.name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
                     ),
-                  ),
-                  subtitle: item.selectedModifiers.isNotEmpty
-                      ? Text(
-                          item.selectedModifiers.join(' • '),
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: Color(0xFF666666),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'ITEMS (${intakeState.items.length})',
+                          style: theme.textTheme.labelLarge,
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text(
+                                  'CLEAR TICKET?',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                content: const Text(
+                                  'This will clear items from the current view.',
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx),
+                                    child: const Text(
+                                      'CANCEL',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.pop(ctx);
+                                      ref.read(intakeProvider.notifier).clear();
+                                      if (!context.mounted) return;
+                                    },
+                                    child: const Text(
+                                      'CLEAR',
+                                      style: TextStyle(
+                                        color: Colors.red,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            'CLEAR',
+                            style: TextStyle(
+                              color: Colors.red,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 11,
+                            ),
                           ),
-                        )
-                      : null,
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.remove_circle_outline, size: 16),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
+                    child: TextField(
+                      controller: _orderNoteController,
+                      onChanged: (val) =>
+                          ref.read(intakeProvider.notifier).setOrderNote(val),
+                      style: const TextStyle(fontSize: 12),
+                      decoration: InputDecoration(
+                        hintText: 'Special instructions / order note...',
+                        hintStyle: TextStyle(
+                          color: theme.hintColor,
+                          fontSize: 11,
+                        ),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: BorderSide(color: theme.dividerColor),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: intakeState.items.length,
+                    separatorBuilder: (context, index) =>
+                        Divider(color: theme.dividerColor, height: 1),
+                    itemBuilder: (context, index) {
+                      final item = intakeState.items[index];
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
                         visualDensity: VisualDensity.compact,
-                        onPressed: () {
-                          if (item.quantity > 1) {
-                            ref.read(intakeProvider.notifier).updateItem(index, quantity: item.quantity - 1);
-                          } else {
-                            ref.read(intakeProvider.notifier).removeItem(index);
-                          }
-                        },
-                      ),
-                      Text(
-                        '${item.quantity}',
-                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add_circle_outline, size: 16),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () {
-                          ref.read(intakeProvider.notifier).updateItem(index, quantity: item.quantity + 1);
-                        },
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '\$${(((item.menuItem.price + item.selectedModifiers.fold(0.0, (sum, m) => sum + parseModifierPrice(m))) * item.quantity)).toStringAsFixed(2)}',
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
-                      ),
-                    ],
+                        leading: const SizedBox.shrink(),
+                        title: Text(
+                          item.menuItem.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                        subtitle: item.selectedModifiers.isNotEmpty
+                            ? Text(
+                                item.selectedModifiers.join(' • '),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF666666),
+                                ),
+                              )
+                            : null,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(
+                                Icons.remove_circle_outline,
+                                size: 16,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () {
+                                if (item.quantity > 1) {
+                                  ref
+                                      .read(intakeProvider.notifier)
+                                      .updateItem(
+                                        index,
+                                        quantity: item.quantity - 1,
+                                      );
+                                } else {
+                                  ref
+                                      .read(intakeProvider.notifier)
+                                      .removeItem(index);
+                                }
+                              },
+                            ),
+                            Text(
+                              '${item.quantity}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 13,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.add_circle_outline,
+                                size: 16,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () {
+                                ref
+                                    .read(intakeProvider.notifier)
+                                    .updateItem(
+                                      index,
+                                      quantity: item.quantity + 1,
+                                    );
+                              },
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '\$${(((item.menuItem.price + item.selectedModifiers.fold(0.0, (sum, m) => sum + parseModifierPrice(m))) * item.quantity)).toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                        onTap: () => _showModifierDialog(
+                          context,
+                          ref,
+                          item.menuItem,
+                          editIndex: index,
+                          initialSelected: item.selectedModifiers,
+                          initialQuantity: item.quantity,
+                        ),
+                      );
+                    },
                   ),
-                    ],
-                  ),
-                  onTap: () => _showModifierDialog(
-                    context,
-                    ref,
-                    item.menuItem,
-                    editIndex: index,
-                    initialSelected: item.selectedModifiers,
-                    initialQuantity: item.quantity,
-                  ),
-                );
-              },
+                ],
+              ),
             ),
           ),
           Padding(
@@ -1420,7 +1555,9 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
     final isEditing = state.editingOrderUuid != null;
     final orderUuid = state.editingOrderUuid ?? const Uuid().v4();
     final baseName = state.customerName.isEmpty ? 'Guest' : state.customerName;
-    final orderName = state.orderNote.isNotEmpty ? '$baseName (${state.orderNote})' : baseName;
+    final orderName = state.orderNote.isNotEmpty
+        ? '$baseName (${state.orderNote})'
+        : baseName;
 
     // Stock decrements, order edits and the kitchen broadcast all live behind
     // the store, so this is identical on a native host and in a browser.

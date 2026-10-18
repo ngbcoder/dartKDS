@@ -10,6 +10,31 @@ class SyncEngine {
 
   static const int recentWindowMs = 120000;
 
+  /// Clamps an inbound enum index instead of indexing with it directly.
+  ///
+  /// `applyChanges` consumes whatever a peer POSTs to `/api/sync/apply`, and a
+  /// peer on a different build — or simply a hand-crafted request — can send a
+  /// status index this build has no value for. Indexing would throw a
+  /// `RangeError` mid-transaction and silently drop the entire change set, so
+  /// an out-of-range value degrades to the nearest valid status instead.
+  static T _enumAt<T>(List<T> values, Object? index) {
+    final i = (index is num) ? index.toInt() : 0;
+    return values[i.clamp(0, values.length - 1)];
+  }
+
+  /// Coerces an inbound list into a list of strings.
+  ///
+  /// `.cast<String>()` defers its type check to element access, so a payload
+  /// containing a non-string would throw from inside Drift's insert and roll
+  /// back the whole transaction. Non-string entries are dropped instead.
+  static List<String> _strList(Object? raw) {
+    if (raw is! List) return const [];
+    return [
+      for (final e in raw)
+        if (e != null) '$e',
+    ];
+  }
+
   Future<String> getSnapshot() async {
     final orders = await db.select(db.kDSOrders).get();
     final items = await db.select(db.kDSItems).get();
@@ -36,18 +61,24 @@ class SyncEngine {
     final windowStart = DateTime.now().millisecondsSinceEpoch - recentWindowMs;
     final effectiveSince = sinceMs < windowStart ? windowStart : sinceMs;
 
-    final orders = await (db.select(db.kDSOrders)
-      ..where((t) => t.updatedAtMs.isBiggerOrEqualValue(effectiveSince))).get();
-    final items = await (db.select(db.kDSItems)
-      ..where((t) => t.updatedAtMs.isBiggerOrEqualValue(effectiveSince))).get();
-    final menuItems = await (db.select(db.menuItems)
-      ..where((t) => t.updatedAtMs.isBiggerOrEqualValue(effectiveSince))).get();
-    final stations = await (db.select(db.stations)
-      ..where((t) => t.updatedAtMs.isBiggerOrEqualValue(sinceMs))).get();
-    final modifiers = await (db.select(db.globalModifiers)
-      ..where((t) => t.updatedAtMs.isBiggerOrEqualValue(sinceMs))).get();
-    final tombstones = await (db.select(db.syncTombstones)
-      ..where((t) => t.updatedAtMs.isBiggerOrEqualValue(sinceMs))).get();
+    final orders = await (db.select(
+      db.kDSOrders,
+    )..where((t) => t.updatedAtMs.isBiggerOrEqualValue(effectiveSince))).get();
+    final items = await (db.select(
+      db.kDSItems,
+    )..where((t) => t.updatedAtMs.isBiggerOrEqualValue(effectiveSince))).get();
+    final menuItems = await (db.select(
+      db.menuItems,
+    )..where((t) => t.updatedAtMs.isBiggerOrEqualValue(effectiveSince))).get();
+    final stations = await (db.select(
+      db.stations,
+    )..where((t) => t.updatedAtMs.isBiggerOrEqualValue(sinceMs))).get();
+    final modifiers = await (db.select(
+      db.globalModifiers,
+    )..where((t) => t.updatedAtMs.isBiggerOrEqualValue(sinceMs))).get();
+    final tombstones = await (db.select(
+      db.syncTombstones,
+    )..where((t) => t.updatedAtMs.isBiggerOrEqualValue(sinceMs))).get();
 
     final data = {
       'orders': orders.map(_orderToMap).toList(),
@@ -103,11 +134,15 @@ class SyncEngine {
   }
 
   Future<void> addTombstone(String tableName, String rowKey) async {
-    await db.into(db.syncTombstones).insert(SyncTombstonesCompanion.insert(
-      sourceTable: tableName,
-      rowKey: rowKey,
-      updatedAtMs: Value(DateTime.now().millisecondsSinceEpoch),
-    ));
+    await db
+        .into(db.syncTombstones)
+        .insert(
+          SyncTombstonesCompanion.insert(
+            sourceTable: tableName,
+            rowKey: rowKey,
+            updatedAtMs: Value(DateTime.now().millisecondsSinceEpoch),
+          ),
+        );
   }
 
   Future<void> _applyTombstone(Map<String, dynamic> t) async {
@@ -116,40 +151,56 @@ class SyncEngine {
     final updatedAtMs = t['updatedAtMs'] as int;
 
     // Check if we already have a newer tombstone
-    final existing = await (db.select(db.syncTombstones)
-      ..where((tbl) => tbl.sourceTable.equals(tableName) & tbl.rowKey.equals(rowKey)))
-        .getSingleOrNull();
+    final existing =
+        await (db.select(db.syncTombstones)..where(
+              (tbl) =>
+                  tbl.sourceTable.equals(tableName) & tbl.rowKey.equals(rowKey),
+            ))
+            .getSingleOrNull();
 
     if (existing != null && existing.updatedAtMs >= updatedAtMs) return;
 
     // Upsert tombstone
-    await db.into(db.syncTombstones).insert(
-      SyncTombstonesCompanion.insert(
-        sourceTable: tableName,
-        rowKey: rowKey,
-        updatedAtMs: Value(updatedAtMs),
-      ),
-      mode: InsertMode.replace,
-    );
+    await db
+        .into(db.syncTombstones)
+        .insert(
+          SyncTombstonesCompanion.insert(
+            sourceTable: tableName,
+            rowKey: rowKey,
+            updatedAtMs: Value(updatedAtMs),
+          ),
+          mode: InsertMode.replace,
+        );
 
     // Physically delete the row
     switch (tableName) {
       case 'kDSOrders':
-        await (db.delete(db.kDSOrders)..where((t) => t.uuid.equals(rowKey))).go();
-        await (db.delete(db.kDSItems)..where((t) => t.orderUuid.equals(rowKey))).go();
+        await (db.delete(
+          db.kDSOrders,
+        )..where((t) => t.uuid.equals(rowKey))).go();
+        await (db.delete(
+          db.kDSItems,
+        )..where((t) => t.orderUuid.equals(rowKey))).go();
         break;
       case 'kDSItems':
-        await (db.delete(db.kDSItems)..where((t) => t.uuid.equals(rowKey))).go();
+        await (db.delete(
+          db.kDSItems,
+        )..where((t) => t.uuid.equals(rowKey))).go();
         break;
       case 'menuItems':
         final id = int.tryParse(rowKey);
-        if (id != null) await (db.delete(db.menuItems)..where((t) => t.id.equals(id))).go();
+        if (id != null)
+          await (db.delete(db.menuItems)..where((t) => t.id.equals(id))).go();
         break;
       case 'stations':
-        await (db.delete(db.stations)..where((t) => t.name.equals(rowKey))).go();
+        await (db.delete(
+          db.stations,
+        )..where((t) => t.name.equals(rowKey))).go();
         break;
       case 'globalModifiers':
-        await (db.delete(db.globalModifiers)..where((t) => t.name.equals(rowKey))).go();
+        await (db.delete(
+          db.globalModifiers,
+        )..where((t) => t.name.equals(rowKey))).go();
         break;
     }
   }
@@ -158,29 +209,54 @@ class SyncEngine {
     final uuid = o['uuid'] as String;
     final updatedAtMs = o['updatedAtMs'] as int;
 
-    final existing = await (db.select(db.kDSOrders)
-      ..where((t) => t.uuid.equals(uuid))).getSingleOrNull();
+    final existing = await (db.select(
+      db.kDSOrders,
+    )..where((t) => t.uuid.equals(uuid))).getSingleOrNull();
 
     if (existing != null && existing.updatedAtMs >= updatedAtMs) return;
 
-    await db.into(db.kDSOrders).insert(
-      KDSOrdersCompanion(
-        uuid: Value(uuid),
-        customerName: Value(o['customerName'] as String),
-        timestamp: Value(DateTime.fromMillisecondsSinceEpoch(o['timestamp'] as int)),
-        status: Value(OrderStatus.values[o['status'] as int]),
-        updatedAtMs: Value(updatedAtMs),
-      ),
-      mode: InsertMode.replace,
-    );
+    // Deliberately an UPDATE rather than `InsertMode.replace`. SQLite implements
+    // INSERT OR REPLACE as DELETE-then-INSERT, and `kDSItems.orderUuid`
+    // references `kDSOrders.uuid` with foreign keys enabled (see the v13
+    // migration note in database.dart). Replacing a parent order therefore
+    // cascaded a delete over its own item rows, or raised SQLITE_CONSTRAINT —
+    // and because the whole change set is applied inside one transaction, a
+    // single order update could roll back every other change in the round.
+    if (existing != null) {
+      await (db.update(db.kDSOrders)..where((t) => t.uuid.equals(uuid))).write(
+        KDSOrdersCompanion(
+          customerName: Value(o['customerName'] as String),
+          timestamp: Value(
+            DateTime.fromMillisecondsSinceEpoch(o['timestamp'] as int),
+          ),
+          status: Value(_enumAt(OrderStatus.values, o['status'])),
+          updatedAtMs: Value(updatedAtMs),
+        ),
+      );
+    } else {
+      await db
+          .into(db.kDSOrders)
+          .insert(
+            KDSOrdersCompanion(
+              uuid: Value(uuid),
+              customerName: Value(o['customerName'] as String),
+              timestamp: Value(
+                DateTime.fromMillisecondsSinceEpoch(o['timestamp'] as int),
+              ),
+              status: Value(_enumAt(OrderStatus.values, o['status'])),
+              updatedAtMs: Value(updatedAtMs),
+            ),
+          );
+    }
   }
 
   Future<void> _mergeItem(Map<String, dynamic> i) async {
     final uuid = i['uuid'] as String;
     final updatedAtMs = i['updatedAtMs'] as int;
 
-    final existing = await (db.select(db.kDSItems)
-      ..where((t) => t.uuid.equals(uuid))).getSingleOrNull();
+    final existing = await (db.select(
+      db.kDSItems,
+    )..where((t) => t.uuid.equals(uuid))).getSingleOrNull();
 
     if (existing != null && existing.updatedAtMs >= updatedAtMs) return;
 
@@ -189,26 +265,28 @@ class SyncEngine {
         KDSItemsCompanion(
           orderUuid: Value(i['orderUuid'] as String),
           name: Value(i['name'] as String),
-          modifiers: Value((i['modifiers'] as List).cast<String>()),
+          modifiers: Value(_strList(i['modifiers'])),
           stationTag: Value(i['stationTag'] as String),
-          status: Value(ItemStatus.values[i['status'] as int]),
+          status: Value(_enumAt(ItemStatus.values, i['status'])),
           price: Value((i['price'] as num).toDouble()),
           updatedAtMs: Value(updatedAtMs),
         ),
       );
     } else {
-      await db.into(db.kDSItems).insert(
-        KDSItemsCompanion(
-          uuid: Value(uuid),
-          orderUuid: Value(i['orderUuid'] as String),
-          name: Value(i['name'] as String),
-          modifiers: Value((i['modifiers'] as List).cast<String>()),
-          stationTag: Value(i['stationTag'] as String),
-          status: Value(ItemStatus.values[i['status'] as int]),
-          price: Value((i['price'] as num).toDouble()),
-          updatedAtMs: Value(updatedAtMs),
-        ),
-      );
+      await db
+          .into(db.kDSItems)
+          .insert(
+            KDSItemsCompanion(
+              uuid: Value(uuid),
+              orderUuid: Value(i['orderUuid'] as String),
+              name: Value(i['name'] as String),
+              modifiers: Value(_strList(i['modifiers'])),
+              stationTag: Value(i['stationTag'] as String),
+              status: Value(_enumAt(ItemStatus.values, i['status'])),
+              price: Value((i['price'] as num).toDouble()),
+              updatedAtMs: Value(updatedAtMs),
+            ),
+          );
     }
   }
 
@@ -219,26 +297,39 @@ class SyncEngine {
     // Try to find by guid first (cross-host stable key), then by name
     MenuItemData? existing;
     if (guid.isNotEmpty) {
-      final byGuid = await (db.select(db.menuItems)
-        ..where((t) => t.guid.equals(guid))).getSingleOrNull();
-      existing = byGuid;
+      final byGuid = await (db.select(
+        db.menuItems,
+      )..where((t) => t.guid.equals(guid))).get();
+      existing = byGuid.isEmpty ? null : byGuid.first;
     }
-    existing ??= await (db.select(db.menuItems)
-      ..where((t) => t.name.equals(m['name'] as String))).getSingleOrNull();
+    // `menuItems.name` carries no unique index, so two items are allowed to
+    // share a name (and the library restore path used to create exactly that).
+    // `getSingleOrNull()` throws on more than one match, which aborted the
+    // entire change set; take the most recently touched row instead.
+    if (existing == null) {
+      final byName =
+          await (db.select(db.menuItems)
+                ..where((t) => t.name.equals(m['name'] as String))
+                ..orderBy([(t) => OrderingTerm.desc(t.updatedAtMs)]))
+              .get();
+      existing = byName.isEmpty ? null : byName.first;
+    }
 
     if (existing != null && existing.updatedAtMs >= updatedAtMs) return;
 
     if (existing != null) {
-      await (db.update(db.menuItems)..where((t) => t.id.equals(existing!.id))).write(
+      await (db.update(
+        db.menuItems,
+      )..where((t) => t.id.equals(existing!.id))).write(
         MenuItemsCompanion(
           guid: guid.isNotEmpty ? Value(guid) : Value(existing.guid),
           name: Value(m['name'] as String),
           category: Value(m['category'] as String),
           defaultStation: Value(m['defaultStation'] as String),
-          modifiers: Value((m['modifiers'] as List).cast<String>()),
+          modifiers: Value(_strList(m['modifiers'])),
           price: Value((m['price'] as num).toDouble()),
-          requiredModifiers: Value((m['requiredModifiers'] as List?)?.cast<String>() ?? []),
-          tags: Value((m['tags'] as List?)?.cast<String>() ?? []),
+          requiredModifiers: Value(_strList(m['requiredModifiers'])),
+          tags: Value(_strList(m['tags'])),
           stockQuantity: Value(m['stockQuantity'] as int),
           trackStock: Value(m['trackStock'] as bool),
           oneTouch: Value(m['oneTouch'] as bool? ?? false),
@@ -246,23 +337,25 @@ class SyncEngine {
         ),
       );
     } else {
-      await db.into(db.menuItems).insert(
-        MenuItemsCompanion(
-          guid: Value(guid.isNotEmpty ? guid : m['guid'] as String? ?? ''),
-          name: Value(m['name'] as String),
-          category: Value(m['category'] as String),
-          defaultStation: Value(m['defaultStation'] as String),
-          modifiers: Value((m['modifiers'] as List).cast<String>()),
-          price: Value((m['price'] as num).toDouble()),
-          requiredModifiers: Value((m['requiredModifiers'] as List?)?.cast<String>() ?? []),
-          tags: Value((m['tags'] as List?)?.cast<String>() ?? []),
-          stockQuantity: Value(m['stockQuantity'] as int),
-          trackStock: Value(m['trackStock'] as bool),
-          oneTouch: Value(m['oneTouch'] as bool? ?? false),
-          updatedAtMs: Value(updatedAtMs),
-        ),
-        mode: InsertMode.replace,
-      );
+      await db
+          .into(db.menuItems)
+          .insert(
+            MenuItemsCompanion(
+              guid: Value(guid.isNotEmpty ? guid : m['guid'] as String? ?? ''),
+              name: Value(m['name'] as String),
+              category: Value(m['category'] as String),
+              defaultStation: Value(m['defaultStation'] as String),
+              modifiers: Value(_strList(m['modifiers'])),
+              price: Value((m['price'] as num).toDouble()),
+              requiredModifiers: Value(_strList(m['requiredModifiers'])),
+              tags: Value(_strList(m['tags'])),
+              stockQuantity: Value(m['stockQuantity'] as int),
+              trackStock: Value(m['trackStock'] as bool),
+              oneTouch: Value(m['oneTouch'] as bool? ?? false),
+              updatedAtMs: Value(updatedAtMs),
+            ),
+            mode: InsertMode.replace,
+          );
     }
   }
 
@@ -270,26 +363,28 @@ class SyncEngine {
     final name = s['name'] as String;
     final updatedAtMs = s['updatedAtMs'] as int;
 
-    final existing = await (db.select(db.stations)
-      ..where((t) => t.name.equals(name))).getSingleOrNull();
+    final existing = await (db.select(
+      db.stations,
+    )..where((t) => t.name.equals(name))).getSingleOrNull();
 
     if (existing != null && existing.updatedAtMs >= updatedAtMs) return;
 
     if (existing != null) {
-      await (db.update(db.stations)..where((t) => t.id.equals(existing.id))).write(
-        StationsCompanion(
-          name: Value(name),
-          updatedAtMs: Value(updatedAtMs),
-        ),
+      await (db.update(
+        db.stations,
+      )..where((t) => t.id.equals(existing.id))).write(
+        StationsCompanion(name: Value(name), updatedAtMs: Value(updatedAtMs)),
       );
     } else {
-      await db.into(db.stations).insert(
-        StationsCompanion(
-          name: Value(name),
-          updatedAtMs: Value(updatedAtMs),
-        ),
-        mode: InsertMode.replace,
-      );
+      await db
+          .into(db.stations)
+          .insert(
+            StationsCompanion(
+              name: Value(name),
+              updatedAtMs: Value(updatedAtMs),
+            ),
+            mode: InsertMode.replace,
+          );
     }
   }
 
@@ -297,26 +392,31 @@ class SyncEngine {
     final name = m['name'] as String;
     final updatedAtMs = m['updatedAtMs'] as int;
 
-    final existing = await (db.select(db.globalModifiers)
-      ..where((t) => t.name.equals(name))).getSingleOrNull();
+    final existing = await (db.select(
+      db.globalModifiers,
+    )..where((t) => t.name.equals(name))).getSingleOrNull();
 
     if (existing != null && existing.updatedAtMs >= updatedAtMs) return;
 
     if (existing != null) {
-      await (db.update(db.globalModifiers)..where((t) => t.id.equals(existing.id))).write(
+      await (db.update(
+        db.globalModifiers,
+      )..where((t) => t.id.equals(existing.id))).write(
         GlobalModifiersCompanion(
           name: Value(name),
           updatedAtMs: Value(updatedAtMs),
         ),
       );
     } else {
-      await db.into(db.globalModifiers).insert(
-        GlobalModifiersCompanion(
-          name: Value(name),
-          updatedAtMs: Value(updatedAtMs),
-        ),
-        mode: InsertMode.replace,
-      );
+      await db
+          .into(db.globalModifiers)
+          .insert(
+            GlobalModifiersCompanion(
+              name: Value(name),
+              updatedAtMs: Value(updatedAtMs),
+            ),
+            mode: InsertMode.replace,
+          );
     }
   }
 

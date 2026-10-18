@@ -67,7 +67,12 @@ class _WebHostHomeState extends ConsumerState<WebHostHome> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Could not reach the host at ${Uri.base.host}:8080';
+        // Report the port the page was actually served from. This used to hardcode
+        // 8080, so on any host running on a different port the error pointed at
+        // an address that was never in use — `WebHostClient._defaultPort`
+        // already derives it correctly.
+        final port = Uri.base.hasPort ? Uri.base.port : 8080;
+        _error = 'Could not reach the host at ${Uri.base.host}:$port';
         _status = WebHostStatus.error;
       });
     }

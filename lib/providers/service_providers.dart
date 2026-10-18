@@ -62,15 +62,20 @@ final connectedClientsProvider = StreamProvider<List<ConnectedClient>>((ref) {
   final server = ref.watch(hostServerProvider);
   final controller = StreamController<List<ConnectedClient>>();
   
-  server.onClientsChanged = () {
-    controller.add(server.connectedClients);
-  };
-  
+  // Registered as its own listener rather than assigned to a shared callback
+  // field, so this and `DriftHostStore.watchClients` can both subscribe without
+  // one clobbering the other on teardown.
+  void listener() {
+    if (!controller.isClosed) controller.add(server.connectedClients);
+  }
+
+  server.addClientListener(listener);
+
   // Initial value
   controller.add(server.connectedClients);
-  
+
   ref.onDispose(() {
-    server.onClientsChanged = null;
+    server.removeClientListener(listener);
     controller.close();
   });
   

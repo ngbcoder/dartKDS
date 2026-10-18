@@ -24,7 +24,6 @@ DartKDS is a lightweight, self-hosted **Kitchen Display System (KDS)** designed 
 
 - 📱 **Flexible Roles** — Turn any tablet or phone into a Primary Host (Intake) or a Kitchen Display (Client).
 - 🔌 **Instant Pairing** — Connect new screens in seconds via **QR Code Scanning**.
-- 🟦 **Square POS Integration** — Feed orders directly from Square into your kitchen screens via built-in webhooks.
 - 🔍 **Smart Routing** — Orders automatically route to specific stations (Grill, Fryer, Bar, etc.) based on your menu configuration.
 - 📊 **Insightful Analytics** — Track item popularity and modifier frequency (e.g., "Which burger toppings are trending?").
 - 🌐 **Browser Support** — Access the kitchen view from any device with a web browser.
@@ -58,9 +57,6 @@ Launch the app on other devices and select **Client**.
 - **Easy Pairing:** Tap "Scan QR Code" on the client and point it at the Host's pairing code in Settings.
 - **Auto-Discovery:** Clients will automatically find the Host if they are on the same Wi-Fi network.
 - **TV Mode** A special mode for when connected to a TV. (**In Progress**)
-
-### 3. External Orders (Optional)
-Connect your **Square POS** to the Host's webhook endpoint (`/api/webhooks/square`) to sync sales automatically.
 
 ---
 

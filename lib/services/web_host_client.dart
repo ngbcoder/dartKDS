@@ -51,10 +51,7 @@ class HostSnapshotData {
       final orderItems = <KDSItemData>[];
       for (final rawItem in (o['items'] as List? ?? [])) {
         if (rawItem is! Map) continue;
-        final item = orderItemFromMap({
-          ...rawItem,
-          'orderUuid': order.uuid,
-        });
+        final item = orderItemFromMap({...rawItem, 'orderUuid': order.uuid});
         items.add(item);
         orderItems.add(item);
       }
@@ -139,18 +136,17 @@ class WebHostClient {
   /// listener yet, and a single-subscription generator can only ever replay to
   /// its one subscriber. Both left the menu library spinning forever, because
   /// the first `HostSnapshot` usually lands before the first view subscribes.
-  late final Stream<HostSnapshotData> snapshots = Stream<HostSnapshotData>.multi((
-    controller,
-  ) {
-    final cached = _latest;
-    if (cached != null) controller.add(cached);
-    final sub = _snapshotController.stream.listen(
-      controller.add,
-      onError: controller.addError,
-      onDone: controller.close,
-    );
-    controller.onCancel = sub.cancel;
-  });
+  late final Stream<HostSnapshotData> snapshots =
+      Stream<HostSnapshotData>.multi((controller) {
+        final cached = _latest;
+        if (cached != null) controller.add(cached);
+        final sub = _snapshotController.stream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+        controller.onCancel = sub.cancel;
+      });
 
   HostSnapshotData? get latestSnapshot => _latest;
 
@@ -178,29 +174,57 @@ class WebHostClient {
   /// document, so its port is the right default and survives a non-8080 setup.
   int get _defaultPort => Uri.base.hasPort ? Uri.base.port : 8080;
 
+  /// How long to wait for the WebSocket handshake before giving up.
+  static const Duration _connectTimeout = Duration(seconds: 8);
+
+  /// Re-entrancy guard, matching `ClientService._open`.
+  bool _connecting = false;
+
   Future<void> _open(String host, int port) async {
+    // The RETRY button calls `connect()` directly, so it can fire while a
+    // scheduled reconnect is already in flight. Without this guard both runs
+    // reach the `await` below, and whichever finishes second overwrites
+    // `_channel`/`_streamSub` — orphaning the loser's socket (never closed) and
+    // its subscription (never cancelled, so it keeps delivering frames from a
+    // dead socket).
+    if (_connecting || isConnected) return;
+    _connecting = true;
+    try {
+      await _openInner(host, port);
+    } finally {
+      _connecting = false;
+    }
+  }
+
+  Future<void> _openInner(String host, int port) async {
     _hostUrl = host;
     _hostPort = port;
     _setStatus(WebHostStatus.connecting);
 
     // Drop any previous link first. Reconnecting without this orphaned the old
     // stream subscription, which kept delivering frames from a dead socket.
+    // The sink is closed as well as the subscription cancelled — the retry loop
+    // runs every few seconds, so a host that is down would otherwise leak one
+    // socket descriptor per attempt and eventually exhaust them.
     await _streamSub?.cancel();
     _streamSub = null;
     _heartbeatTimer?.cancel();
+    await _channel?.sink.close().catchError((_) {});
+    _channel = null;
 
     final scheme = Uri.base.scheme == 'https' ? 'wss' : 'ws';
-    final wsUrl = Uri(
-      scheme: scheme,
-      host: host,
-      port: port,
-      path: '/ws',
-    );
+    final wsUrl = Uri(scheme: scheme, host: host, port: port, path: '/ws');
 
+    WebSocketChannel? channel;
     try {
-      final channel = WebSocketChannel.connect(wsUrl);
+      channel = WebSocketChannel.connect(wsUrl);
       _channel = channel;
-      await channel.ready;
+      // Bounded, unlike the bare `await channel.ready` this replaces. A host
+      // that accepts the TCP connection but never finishes the handshake used
+      // to hang here forever: the retry was never scheduled and the shell sat
+      // on "Connecting to host..." permanently. `ClientService._open` already
+      // applies the same timeout.
+      await channel.ready.timeout(_connectTimeout);
 
       _streamSub = channel.stream.listen(
         _onMessage,
@@ -231,6 +255,11 @@ class WebHostClient {
       // that registration raced the listener attaching.
       requestSnapshot();
     } catch (_) {
+      // Close the half-open socket before giving up, for the same descriptor
+      // reason as above, then clear `_channel` so a later `_open` does not try
+      // to reuse a dead one.
+      await channel?.sink.close().catchError((_) {});
+      if (identical(_channel, channel)) _channel = null;
       _setStatus(WebHostStatus.error);
       _scheduleReconnect();
       rethrow;
@@ -277,7 +306,8 @@ class WebHostClient {
         break;
 
       case 'SnapshotError':
-        _lastFrameError = 'Host could not build a snapshot: ${event['message']}';
+        _lastFrameError =
+            'Host could not build a snapshot: ${event['message']}';
         break;
     }
 
@@ -336,8 +366,7 @@ class WebHostClient {
   void recallOrder(String orderUuid) =>
       send({'type': 'RecallOrder', 'orderUuid': orderUuid});
 
-  void clearSalesAndHistory() =>
-      send({'type': 'ClearSalesAndHistory'});
+  void clearSalesAndHistory() => send({'type': 'ClearSalesAndHistory'});
 
   void saveMenuItem(Map<String, dynamic> draft) =>
       send({'type': 'SaveMenuItem', 'draft': draft});
@@ -347,19 +376,13 @@ class WebHostClient {
   void setStock(int id, int quantity) =>
       send({'type': 'SetStock', 'id': id, 'quantity': quantity});
 
-  void saveStation({int? id, required String name}) => send({
-    'type': 'SaveStationItem',
-    'id': id,
-    'name': name,
-  });
+  void saveStation({int? id, required String name}) =>
+      send({'type': 'SaveStationItem', 'id': id, 'name': name});
 
   void deleteStation(int id) => send({'type': 'DeleteStationItem', 'id': id});
 
-  void saveGlobalModifier({int? id, required String name}) => send({
-    'type': 'SaveGlobalModifierItem',
-    'id': id,
-    'name': name,
-  });
+  void saveGlobalModifier({int? id, required String name}) =>
+      send({'type': 'SaveGlobalModifierItem', 'id': id, 'name': name});
 
   void deleteGlobalModifier(int id) =>
       send({'type': 'DeleteGlobalModifierItem', 'id': id});

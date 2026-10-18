@@ -4,7 +4,7 @@ Documentation of every screen, its layout, states, and interactions. Source of t
 Flutter code under `lib/ui/` plus the theme in `lib/main.dart`.
 
 Known rough edges and bugs found while writing this are tracked separately in
-[`UI_KNOWN_ISSUES.md`](UI_KNOWN_ISSUES.md).
+[`UI_Known_Issues.md`](UI_Known_Issues.md).
 
 ---
 
@@ -509,9 +509,9 @@ contrast (red once ≥ 10 min), otherwise 2px in the aging color at the pulse op
 
 **Card body:**
 1. 6px urgency bar in the aging color.
-2. Header row at 5% aging-color alpha: `SQ` badge (`#10B981`) for Square orders, then
-   `#ABCD • CUSTOMER` (16 in rush mode / 20 normal) — the customer name is omitted entirely in
-   rush mode — and the elapsed `NNm` in the aging color, monospace 16 w900.
+2. Header row at 5% aging-color alpha: `#ABCD • CUSTOMER` (16 in rush mode / 20 normal) — the
+   customer name is omitted entirely in rush mode — and the elapsed `NNm` in the aging color,
+   monospace 16 w900.
 3. Item list. Tapping an item bumps it: `HapticFeedback.lightImpact()`, sends `ItemBumped` over
    the socket, and drops the row to 30% opacity (`AnimatedOpacity` 200ms) with a green
    `check_circle` and strikethrough name. Modifiers render as a `#FACC15` flag with black
@@ -585,11 +585,10 @@ whose `stationTag` matches, and hides the card when nothing matches.
 | Paid / settled | `#16A34A` |
 | Confirmed action (quick send) | `#10B981` |
 | Station chip | `#22C55E` |
-| Warning / aging 5–10 min / Square badge | `#FACC15`, `#F59E0B` |
+| Warning / aging 5–10 min | `#FACC15`, `#F59E0B` |
 | Late (≥ 10 min) / rush / broadcast / danger | `#DC2626` |
 | Muted / closed tab | `#6B7280`, `#64748B` |
 | Neutral dark surface | `#111111`, `#0F172A`, `#1E2937`, `#1F2937` |
-| Order by phone (Square) | `SQ` chip in `#10B981` |
 
 ---
 

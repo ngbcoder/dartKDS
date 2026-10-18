@@ -21,6 +21,29 @@ import subprocess
 import sys
 from pathlib import Path
 
+
+def _force_utf8_stdio():
+    """Make this process able to print whatever the Flutter tools emit.
+
+    The subprocesses are already decoded as UTF-8 (see `run`), but printing that
+    text re-encodes it into this process's stdout, which Windows defaults to
+    cp1252. Flutter marks success with a U+2713 CHECK MARK and failure with
+    U+2717, neither of which cp1252 can represent, so the script used to die
+    with a UnicodeEncodeError partway through echoing the build log — killing
+    the run after the tool it was reporting on had already succeeded. This
+    turned a successful `flutter build web` into a failed build.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            # Python < 3.7, or a stream already detached. Fall back to the
+            # legacy codec switch, which is enough to keep the build running.
+            try:
+                stream.detach()
+            except Exception:
+                pass
+
 def get_jdk():
     candidates = [
         r"C:\Users\29bragann\Documents\Software\Prism\java\java-runtime-delta",
@@ -35,8 +58,42 @@ def get_jdk():
             return c
     return r"C:\Users\29bragann\Documents\Software\Prism\java\java-runtime-delta"
 
+def get_sdk():
+    """Locate an Android SDK that is actually usable.
+
+    This used to be a hardcoded path belonging to a different machine
+    (`C:\\Users\\29bragann\\...`), which silently sent ANDROID_HOME somewhere
+    that does not exist here. Worse, `android/local.properties` — which Gradle
+    prefers over the environment — pointed `sdk.dir` at a directory holding
+    nothing but `platform-tools`, so the build demanded an NDK download and then
+    failed on unaccepted SDK licenses. Neither path had `platforms/`,
+    `build-tools/` or `ndk/`, so the APK could not be produced from either.
+
+    Candidates are ordered so a complete, already-licensed SDK wins over a
+    partial one. `platforms/` plus `build-tools/` is the cheapest reliable test
+    for "can actually build an APK".
+    """
+    home = os.path.expanduser("~")
+    candidates = [
+        os.environ.get("ANDROID_SDK_ROOT", ""),
+        os.environ.get("ANDROID_HOME", ""),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk"),
+        os.path.join(home, "AppData", "Local", "Android", "Sdk"),
+        os.path.join(home, "Library", "Android", "sdk"),
+        os.path.join(home, "Android", "Sdk"),
+    ]
+    for c in candidates:
+        if c and os.path.isdir(os.path.join(c, "platforms")) and os.path.isdir(
+            os.path.join(c, "build-tools")
+        ):
+            return c
+    for c in candidates:
+        if c and os.path.isdir(c):
+            return c
+    return candidates[2] or "Android/Sdk"
+
 JDK = get_jdk()
-SDK_DIR = r"C:\Users\29bragann\AppData\Local\Android\Sdk"
+SDK_DIR = get_sdk()
 os.environ["JAVA_HOME"] = JDK
 os.environ["ANDROID_HOME"] = SDK_DIR
 os.environ["ANDROID_SDK_ROOT"] = SDK_DIR
@@ -111,6 +168,7 @@ def cleanup_android_locks():
 
 
 def main():
+    _force_utf8_stdio()
     cleanup_android_locks()
     ap = argparse.ArgumentParser(
         prog="build",

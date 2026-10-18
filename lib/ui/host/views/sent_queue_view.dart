@@ -16,7 +16,7 @@ class SentQueueView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final store = ref.watch(hostStoreProvider);
     final settings = ref.watch(settingsProvider);
-    
+
     final theme = Theme.of(context);
     final timeFormat = settings.use24HourFormat ? 'HH:mm' : 'h:mm a';
 
@@ -177,85 +177,55 @@ class SentQueueView extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.person_outline_rounded,
-                          size: 18,
-                          color: theme.colorScheme.primary,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          order.customerName.toUpperCase(),
-                          style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 15,
-                            color: theme.textTheme.bodyLarge?.color,
+                    // Both sides used to sit in a bare `spaceBetween` Row with
+                    // no flex, so a long guest name overflowed the card and
+                    // painted straight over the timestamp and the action chip.
+                    // The label side is now the flexible one and ellipsises;
+                    // the action side is fixed-width and keeps its tap target.
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.person_outline_rounded,
+                            size: 18,
+                            color: theme.colorScheme.primary,
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '#${order.uuid.substring(0, 4).toUpperCase()}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: theme.hintColor,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        _buildStatusBadge(order.status),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        Text(
-                          DateFormat(timeFormat).format(order.timestamp),
-                          style: TextStyle(
-                            color: theme.hintColor,
-                            fontFamily: 'monospace',
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        InkWell(
-                          onTap: () => _editOrder(context, ref, store, order),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.primary.withValues(
-                                alpha: 0.1,
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              order.customerName.toUpperCase(),
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 15,
+                                color: theme.textTheme.bodyLarge?.color,
                               ),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  isActive
-                                      ? Icons.add_rounded
-                                      : Icons.edit_outlined,
-                                  size: 12,
-                                  color: theme.colorScheme.primary,
-                                ),
-                                const SizedBox(width: 3),
-                                Text(
-                                  isActive ? 'ADD ITEMS' : 'EDIT',
-                                  style: TextStyle(
-                                    color: theme.colorScheme.primary,
-                                    fontWeight: FontWeight.w900,
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ],
                             ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          Text(
+                            '#${order.uuid.substring(0, 4).toUpperCase()}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: theme.hintColor,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _buildStatusBadge(order.status),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    _buildOrderActionButton(
+                      context,
+                      ref,
+                      store,
+                      order,
+                      isActive,
+                      timeFormat,
                     ),
                   ],
                 ),
@@ -280,42 +250,49 @@ class SentQueueView extends ConsumerWidget {
                           (i) => Padding(
                             padding: const EdgeInsets.only(bottom: 4.0),
                             child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.check_circle,
-                                      size: 14,
-                                      color: Color(0xFF22C55E),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          i.name,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                        if (i.modifiers.isNotEmpty)
-                                          Text(
-                                            i.modifiers.join(', '),
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              color: theme.hintColor,
-                                              fontWeight: FontWeight.bold,
-                                              backgroundColor: const Color(
-                                                0xFFFACC15,
-                                              ).withValues(alpha: 0.1),
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.check_circle,
+                                        size: 14,
+                                        color: Color(0xFF22C55E),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              i.name,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
-                                          ),
-                                      ],
-                                    ),
-                                  ],
+                                            if (i.modifiers.isNotEmpty)
+                                              Text(
+                                                i.modifiers.join(', '),
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: theme.hintColor,
+                                                  fontWeight: FontWeight.bold,
+                                                  backgroundColor: const Color(
+                                                    0xFFFACC15,
+                                                  ).withValues(alpha: 0.1),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
+                                const SizedBox(width: 8),
                                 Text(
                                   '\$${i.price.toStringAsFixed(2)}',
                                   style: TextStyle(
@@ -358,6 +335,83 @@ class SentQueueView extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+
+  /// The per-order action on each history card.
+  ///
+  /// This was an `InkWell` wrapped around a bare `Container`, which gave it a
+  /// ~22px tap target with no button semantics, no hover or focus state, and
+  /// no visual response when pressed — it read as a static label that happened
+  /// to be clickable. It is now a real Material button: a proper 40px target,
+  /// a border so it is distinguishable from the card, a visible ripple, and a
+  /// `Semantics` button role with a spoken label that says which order and
+  /// which action, rather than announcing the raw "ADD ITEMS" string.
+  Widget _buildOrderActionButton(
+    BuildContext context,
+    WidgetRef ref,
+    HostStore store,
+    KDSOrderData order,
+    bool isActive,
+    String timeFormat,
+  ) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final shortId = order.uuid.substring(0, 4).toUpperCase();
+
+    return Semantics(
+      button: true,
+      label: isActive
+          ? 'Add items to order $shortId for ${order.customerName}'
+          : 'Edit order $shortId for ${order.customerName}',
+      child: Material(
+        color: primary.withValues(alpha: 0.1),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: BorderSide(color: primary.withValues(alpha: 0.35)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _editOrder(context, ref, store, order),
+          child: ConstrainedBox(
+            // 40px is the smallest target that stays reliably tappable with a
+            // thumb without the chip dominating the card header.
+            constraints: const BoxConstraints(minHeight: 40, minWidth: 40),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isActive ? Icons.add_rounded : Icons.edit_outlined,
+                    size: 14,
+                    color: primary,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    isActive ? 'ADD ITEMS' : 'EDIT',
+                    style: TextStyle(
+                      color: primary,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 10,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    DateFormat(timeFormat).format(order.timestamp),
+                    style: TextStyle(
+                      color: theme.hintColor,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 

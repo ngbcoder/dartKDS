@@ -93,6 +93,7 @@ class HostServer {
   Timer? _webHostNotifyDebounce;
   HttpServer? _server;
   KDSDatabase? _db;
+
   /// What was actually bound, as opposed to what was requested. Everything that
   /// advertises this host to a display must read [port].
   int _boundPort = 0;
@@ -110,8 +111,29 @@ class HostServer {
   // dart-define. When null/absent, a helper page is shown instead.
   String? webUiDir;
 
-  // Callback to notify UI of client changes
-  Function? onClientsChanged;
+  /// Notifies UI of client changes.
+  ///
+  /// A set rather than a single `Function?` slot: there are two independent
+  /// subscribers (the `connectedClientsProvider` stream and
+  /// `DriftHostStore.watchClients`), and they used to share one field by
+  /// chaining. Chaining breaks as soon as the *older* listener unsubscribes
+  /// first — restoring its captured `previous` silently discards the newer
+  /// listener's wrapper, which then stops receiving updates with no error
+  /// anywhere. Register and unregister symmetrically instead.
+  final Set<void Function()> _clientListeners = <void Function()>{};
+
+  bool addClientListener(void Function() listener) =>
+      _clientListeners.add(listener);
+
+  void removeClientListener(void Function() listener) =>
+      _clientListeners.remove(listener);
+
+  void notifyClientsChanged() {
+    // Copied first: a listener may unsubscribe during the call.
+    for (final listener in List<void Function()>.of(_clientListeners)) {
+      listener();
+    }
+  }
 
   List<ConnectedClient> get connectedClients => List.unmodifiable(_clients);
 
@@ -654,8 +676,6 @@ class HostServer {
       );
     });
 
-    router.post('/api/webhooks/square', _handleSquareWebhook);
-
     router.get(
       '/ws',
       webSocketHandler((WebSocketChannel webSocket) {
@@ -692,7 +712,7 @@ class HostServer {
                   ),
                 );
 
-                onClientsChanged?.call();
+                notifyClientsChanged();
                 _notifyWebHostDebounced();
 
                 // Send active (non-complete) orders to the new client
@@ -806,10 +826,19 @@ class HostServer {
                           uuid: itemUuid,
                           orderUuid: orderUuid,
                           name: item['name']?.toString() ?? 'Item',
-                          modifiers: List<String>.from(item['modifiers'] as List? ?? []),
-                          stationTag: item['stationTag']?.toString() ?? 'GENERAL',
+                          modifiers: List<String>.from(
+                            item['modifiers'] as List? ?? [],
+                          ),
+                          stationTag:
+                              item['stationTag']?.toString() ?? 'GENERAL',
                           status: ItemStatus.pending,
-                          price: drift.Value((item['price'] as num?)?.toDouble() ?? double.tryParse(item['price']?.toString() ?? '') ?? 0.0),
+                          price: drift.Value(
+                            (item['price'] as num?)?.toDouble() ??
+                                double.tryParse(
+                                  item['price']?.toString() ?? '',
+                                ) ??
+                                0.0,
+                          ),
                           updatedAtMs: drift.Value(
                             DateTime.now().millisecondsSinceEpoch,
                           ),
@@ -1255,7 +1284,7 @@ class HostServer {
                 final idx = _clients.indexWhere((c) => c.id == clientId);
                 if (idx != -1) {
                   _clients[idx].currentStation = data['station'];
-                  onClientsChanged?.call();
+                  notifyClientsChanged();
                   _notifyWebHostDebounced();
                 }
               } else if (data['type'] == 'ping') {
@@ -1265,6 +1294,20 @@ class HostServer {
                 _send(webSocket, jsonEncode({'type': 'pong'}));
               } else if (data['type'] == 'pong') {
                 // Answer to the host's heartbeat.
+                //
+                // Anything carrying a `targetClientId` is addressed to exactly
+                // one display and must never reach the others. The browser host
+                // (`WebHostClient.sendToClient`) sets that field, and it used to
+                // fall through to the catch-all broadcast below — so
+                // reassigning a station from the web UI hit every KDS in the
+                // building at once. The native path routes through
+                // `sendToClient` and targeted correctly already, which is why
+                // only the browser host misbehaved.
+                final target = data['targetClientId'];
+                if (target is String) {
+                  final channel = _clientChannels[target];
+                  if (channel != null) channel.sink.add(message);
+                }
               } else if (data['type'] != 'RegisterClient' &&
                   data['type'] != 'RegisterWebHost') {
                 broadcast(message);
@@ -1273,7 +1316,7 @@ class HostServer {
               print('Error handling WS message: $e');
             }
           },
-        onDone: () {
+          onDone: () {
             if (isWebHost) {
               _dropWebHost(clientId, webSocket);
             } else {
@@ -1513,7 +1556,12 @@ class HostServer {
       }
     }
     final bundled = await _bundleAsset(path);
-    if (bundled != null) return _webResponse(path, bundled);
+    // Marked cacheable to match the on-disk branch above. The same asset had
+    // opposite policies depending on where it came from, and this is the branch
+    // that runs on a released Android build — where the bundle is served out of
+    // `assets/webui.bin` and the disk path never exists — so every
+    // `main.dart.js` and canvaskit `.wasm` was re-downloaded on each page load.
+    if (bundled != null) return _webResponse(path, bundled, cacheable: true);
     final ext = p.extension(path);
     if (ext.isEmpty || path == 'index.html') return _serveIndex();
     return Response.notFound('Not found');
@@ -1601,6 +1649,12 @@ class HostServer {
     final server = _server;
     _server = null;
     _boundPort = 0;
+    // The cached URL embeds `_boundPort`. Clearing `_boundPort` above is not
+    // enough on its own: without this, switching device role (stop, then start
+    // again) keeps serving the previous run's address out of `selfUrl`, so the
+    // pairing QR code and the endpoint handed to a client name a port this
+    // server is no longer listening on.
+    _cachedSelfUrl = null;
     await server?.close(force: true);
     for (var client in _clientChannels.values) {
       client.sink.close();
@@ -1657,7 +1711,11 @@ class HostServer {
   /// the new registration has replaced it. Evicting on id alone meant the late
   /// close threw away a healthy connection, and the display was dropped from the
   /// roster until it happened to reconnect again.
-  void _dropClient(String? clientId, {required bool notify, WebSocketChannel? channel}) {
+  void _dropClient(
+    String? clientId, {
+    required bool notify,
+    WebSocketChannel? channel,
+  }) {
     if (clientId == null) return;
     final registered = _clientChannels[clientId];
     if (channel != null && !identical(registered, channel)) {
@@ -1670,7 +1728,7 @@ class HostServer {
     _clientChannels.remove(clientId)?.sink.close();
     _clientLastSeen.remove(clientId);
     if (removed && notify) {
-      onClientsChanged?.call();
+      notifyClientsChanged();
       _notifyWebHostDebounced();
     }
   }
@@ -1719,7 +1777,9 @@ class HostServer {
   /// without waiting out the real grace period.
   @visibleForTesting
   void debugMarkClientStale(String clientId) {
-    _clientLastSeen[clientId] = DateTime.now().subtract(_clientSilenceLimit * 2);
+    _clientLastSeen[clientId] = DateTime.now().subtract(
+      _clientSilenceLimit * 2,
+    );
   }
 
   /// Closes a client's socket server-side while leaving its roster entry in
@@ -1963,208 +2023,5 @@ class HostServer {
         }),
       );
     }
-  }
-
-  Future<Response> _handleSquareWebhook(Request request) async {
-    try {
-      final body = await _jsonBody(request);
-      if (body == null) return Response.badRequest(body: 'Invalid JSON');
-
-      // Square webhooks can be wrapped in a 'data' object
-      final orderData = body['data']?['object']?['order'] ?? body['order'];
-      if (orderData is! Map) {
-        return Response.badRequest(body: 'Square Order data not found');
-      }
-      final squareOrderId = (body['data']?['object']?['order']?['id'] ??
-              body['order']?['id'] ??
-              body['id'])
-          ?.toString();
-
-      await _processSquareOrder(
-        orderData.cast<String, dynamic>(),
-        squareOrderId: squareOrderId,
-      );
-      return Response.ok(jsonEncode({'success': true}));
-    } catch (e) {
-      debugPrint('Square Webhook Error: $e');
-      // The message is logged, not returned: it can quote row data from the
-      // order, and the caller is an unauthenticated LAN endpoint.
-      return Response.internalServerError(
-        body: jsonEncode({
-          'success': false,
-          'error': 'Order could not be processed',
-        }),
-        headers: {'Content-Type': 'application/json'},
-      );
-    }
-  }
-
-  /// Square order ids this host has already ingested, newest last.
-  ///
-  /// Square redelivers a webhook whenever it does not see a 2xx, and this host
-  /// used to guarantee a retry: a `RangeError` in the customer-id formatting, or
-  /// a crash between the order insert and the item inserts, each turned into a
-  /// 500. Every retry fired the same ticket at the kitchen again. Bounded
-  /// because redelivery happens within minutes, not days.
-  final Set<String> _seenSquareOrders = <String>{};
-  static const int _maxSeenSquareOrders = 500;
-
-  Future<void> _processSquareOrder(
-    Map<String, dynamic> orderData, {
-    String? squareOrderId,
-  }) async {
-    final db = _db!;
-
-    if (squareOrderId != null) {
-      if (!_seenSquareOrders.add(squareOrderId)) {
-        debugPrint('Square order $squareOrderId already ingested; ignoring retry');
-        return;
-      }
-      if (_seenSquareOrders.length > _maxSeenSquareOrders) {
-        _seenSquareOrders.remove(_seenSquareOrders.first);
-      }
-    }
-
-    final orderUuid = const Uuid().v4();
-    final timestamp = DateTime.now();
-
-    // Extract customer name or use "Square Order"
-    final customerName = _squareCustomerName(orderData, squareOrderId);
-
-    // Stock decrements and item inserts must land together. Part-way failure
-    // left stock consumed against an order that never made it to the kitchen.
-    final jsonItems = await db.transaction(() async {
-      await db.into(db.kDSOrders).insert(
-        KDSOrderData(
-          uuid: orderUuid,
-          customerName: customerName,
-          timestamp: timestamp,
-          status: OrderStatus.pending,
-          updatedAtMs: DateTime.now().millisecondsSinceEpoch,
-        ),
-      );
-
-      final items = <Map<String, dynamic>>[];
-      final lineItems = orderData['line_items'] as List? ?? const [];
-
-      for (final raw in lineItems) {
-        if (raw is! Map) continue;
-        final li = raw.cast<String, dynamic>();
-        final itemName = (li['name'] ?? 'Unknown Item').toString();
-        final quantity = _squareQuantity(li['quantity']);
-        final price =
-            ((li['base_price_money']?['amount'] as num?)?.toDouble() ?? 0.0) /
-            100.0; // Square cents to dollars
-
-        final mods = <String>[];
-        for (final m in (li['modifiers'] as List? ?? const [])) {
-          if (m is Map) mods.add((m['name'] ?? '').toString());
-        }
-
-        // Smart Routing: Match with local menu to get station
-        final menuMatches = await (db.select(
-          db.menuItems,
-        )..where((t) => t.name.equals(itemName))).get();
-        var stationTag = 'GENERAL';
-        if (menuMatches.isNotEmpty) {
-          final menuItem = menuMatches.first;
-          stationTag = menuItem.defaultStation;
-
-          if (menuItem.trackStock) {
-            // Clamped: a webhook for more than we hold used to drive tracked
-            // stock negative, which then made the low-stock view nonsense.
-            await (db.update(
-              db.menuItems,
-            )..where((t) => t.id.equals(menuItem.id))).write(
-              MenuItemsCompanion(
-                stockQuantity: drift.Value(
-                  (menuItem.stockQuantity - quantity).clamp(0, 1 << 31),
-                ),
-                updatedAtMs: drift.Value(DateTime.now().millisecondsSinceEpoch),
-              ),
-            );
-          }
-        }
-
-        // Square sends one line item with a quantity; the kitchen expects one
-        // ticket line per unit, same as the native intake path.
-        for (var unit = 0; unit < quantity; unit++) {
-          final itemUuid = const Uuid().v4();
-          await db.into(db.kDSItems).insert(
-            KDSItemsCompanion.insert(
-              uuid: itemUuid,
-              orderUuid: orderUuid,
-              name: itemName,
-              modifiers: mods,
-              stationTag: stationTag,
-              status: ItemStatus.pending,
-              price: drift.Value(price),
-              updatedAtMs: drift.Value(DateTime.now().millisecondsSinceEpoch),
-            ),
-          );
-          items.add({
-            'uuid': itemUuid,
-            'name': itemName,
-            'modifiers': mods,
-            'stationTag': stationTag,
-            'status': ItemStatus.pending.index,
-            'price': price,
-          });
-        }
-      }
-      return items;
-    });
-
-    // Broadcast to all KDS clients
-    broadcast(
-      jsonEncode({
-        'type': 'OrderCreated',
-        'order': {
-          'uuid': orderUuid,
-          'customerName': customerName,
-          'timestamp': timestamp.toIso8601String(),
-          'status': OrderStatus.pending.index,
-          'items': jsonItems,
-        },
-      }),
-    );
-  }
-
-  /// Builds the kitchen-visible customer label for a Square order.
-  ///
-  /// The old `substring(0, 5)` threw a `RangeError` on any customer id shorter
-  /// than five characters, which Square does send for test and manually entered
-  /// orders. That turned one webhook into a 500, and Square's retry turned it
-  /// into an endless redelivery loop against a host that could never accept it.
-  static String _squareCustomerName(
-    Map<String, dynamic> orderData,
-    String? squareOrderId,
-  ) {
-    final reference = (orderData['reference_id'] ?? '').toString().trim();
-    if (reference.isNotEmpty) return 'SQ: $reference';
-
-    final customer = (orderData['customer_id'] ?? '').toString().trim();
-    if (customer.isNotEmpty) {
-      final shortened = customer.length > 5 ? customer.substring(0, 5) : customer;
-      return 'SQ: $shortened';
-    }
-
-    if (squareOrderId != null && squareOrderId.isNotEmpty) return 'SQ: $squareOrderId';
-    return 'Square Order';
-  }
-
-  /// Square sends quantity as a string, but older payloads and hand-made
-  /// requests use a number. `int.tryParse` on a num throws rather than falling
-  /// back, which aborted the whole order.
-  static int _squareQuantity(dynamic raw) {
-    final value = switch (raw) {
-      int v => v,
-      num v => v.round(),
-      String v => int.tryParse(v) ?? double.tryParse(v)?.round(),
-      _ => null,
-    };
-    if (value == null || value < 1) return 1;
-    // Bounded so a hostile or malformed quantity cannot spin the insert loop.
-    return value.clamp(1, 999);
   }
 }

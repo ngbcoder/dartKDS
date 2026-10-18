@@ -34,10 +34,7 @@ void main() {
   /// Connects a socket, registers it, and hands back the inbox so a test can
   /// assert on what the client would actually receive.
   Future<({WebSocketChannel channel, StreamQueue<Map<String, dynamic>> inbox})>
-  registerClient(
-    String id, {
-    String station = 'GENERAL',
-  }) async {
+  registerClient(String id, {String station = 'GENERAL'}) async {
     final channel = WebSocketChannel.connect(
       Uri.parse('ws://127.0.0.1:${server.port}/ws'),
     );
@@ -117,7 +114,9 @@ void main() {
   test('a registered client appears in the roster', () async {
     await registerClient('client-a', station: 'GRILL');
 
-    final client = server.connectedClients.firstWhere((c) => c.id == 'client-a');
+    final client = server.connectedClients.firstWhere(
+      (c) => c.id == 'client-a',
+    );
     expect(client.currentStation, 'GRILL');
     expect(client.deviceName, 'Test client-a');
   });
@@ -150,7 +149,9 @@ void main() {
     // every client after it in the map.
     server.debugCloseClientSocket('client-b');
 
-    server.broadcast(jsonEncode({'type': 'KitchenBroadcast', 'message': 'ping'}));
+    server.broadcast(
+      jsonEncode({'type': 'KitchenBroadcast', 'message': 'ping'}),
+    );
 
     expect(
       await nextWhere(a, (f) => f['message'] == 'ping'),
@@ -164,24 +165,32 @@ void main() {
     );
   });
 
-  test('a dead client is dropped from the roster after a failed write', () async {
-    await registerClient('client-a');
-    await registerClient('client-dead');
+  test(
+    'a dead client is dropped from the roster after a failed write',
+    () async {
+      await registerClient('client-a');
+      await registerClient('client-dead');
 
-    server.debugCloseClientSocket('client-dead');
-    server.broadcast(jsonEncode({'type': 'KitchenBroadcast', 'message': 'ping'}));
+      server.debugCloseClientSocket('client-dead');
+      server.broadcast(
+        jsonEncode({'type': 'KitchenBroadcast', 'message': 'ping'}),
+      );
 
-    // Evicted rather than retried on every future order, which would keep
-    // throwing once per ticket for the life of the host.
-    await waitFor(
-      () => !server.connectedClients.any((c) => c.id == 'client-dead'),
-      reason: 'the dead client to be evicted',
-    );
-    expect(server.connectedClients.map((c) => c.id), contains('client-a'));
-  });
+      // Evicted rather than retried on every future order, which would keep
+      // throwing once per ticket for the life of the host.
+      await waitFor(
+        () => !server.connectedClients.any((c) => c.id == 'client-dead'),
+        reason: 'the dead client to be evicted',
+      );
+      expect(server.connectedClients.map((c) => c.id), contains('client-a'));
+    },
+  );
 
   test('station routing only reaches that station', () async {
-    final grill = (await registerClient('client-grill', station: 'GRILL')).inbox;
+    final grill = (await registerClient(
+      'client-grill',
+      station: 'GRILL',
+    )).inbox;
     final expo = (await registerClient('client-expo', station: 'EXPO')).inbox;
 
     server.broadcastToStation('GRILL', jsonEncode({'type': 'RushModeChanged'}));
@@ -272,7 +281,9 @@ void main() {
   test('orders submitted over HTTP reach the kitchen', () async {
     await registerClient('client-a');
 
-    await db.into(db.menuItems).insert(
+    await db
+        .into(db.menuItems)
+        .insert(
           MenuItemsCompanion.insert(
             guid: const Value('guid-burger'),
             name: 'Burger',
@@ -282,9 +293,7 @@ void main() {
             updatedAtMs: Value(DateTime.now().millisecondsSinceEpoch),
           ),
         );
-    await db.into(db.stations).insert(
-          StationsCompanion.insert(name: 'GRILL'),
-        );
+    await db.into(db.stations).insert(StationsCompanion.insert(name: 'GRILL'));
 
     final response = await http.post(
       base.replace(path: '/api/menu'),
@@ -312,7 +321,9 @@ void main() {
     // A real v4 uuid: drift validates the column, and the replay assertions care
     // about which order came back rather than about the id being a stand-in.
     const doneUuid = '11111111-2222-4333-8444-555555555555';
-    await db.into(db.kDSOrders).insert(
+    await db
+        .into(db.kDSOrders)
+        .insert(
           KDSOrderData(
             uuid: doneUuid,
             customerName: 'Guest',
@@ -334,134 +345,6 @@ void main() {
       inbox,
       reason: 'a finished order must not also arrive as an open ticket',
     );
-  });
-
-  group('Square webhook ingestion', () {
-    /// Posts a Square-shaped payload and returns the response.
-    Future<http.Response> postSquare(Map<String, dynamic> order) async {
-      return http.post(
-        base.replace(path: '/api/webhooks/square'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'id': 'sq-1', 'order': order}),
-      );
-    }
-
-    Map<String, dynamic> squareOrder({
-      String customerId = 'cust-1234567890',
-      String referenceId = 'TILL-1',
-      List<Map<String, dynamic>> lineItems = const [
-        {'name': 'Burger', 'quantity': '1', 'base_price_money': {'amount': 950}},
-      ],
-    }) =>
-        {
-          'id': 'sq-1',
-          'customer_id': customerId,
-          'reference_id': referenceId,
-          'line_items': lineItems,
-        };
-
-    test('a webhook creates an order the kitchen can see', () async {
-      final response = await postSquare(squareOrder());
-      expect(response.statusCode, 200);
-
-      final orders = await db.select(db.kDSOrders).get();
-      expect(orders, hasLength(1));
-      expect(orders.single.customerName, 'SQ: TILL-1');
-      final items = await db.select(db.kDSItems).get();
-      expect(items, hasLength(1));
-      expect(items.single.name, 'Burger');
-      expect(items.single.price, 9.5);
-    });
-
-    test('a short customer id is accepted rather than throwing', () async {
-      // `substring(0, 5)` used to throw a RangeError here, which became a 500
-      // and made Square retry the same payload forever. No reference id, so the
-      // customer id is what the label is built from.
-      final response = await postSquare(
-        squareOrder(customerId: 'abc', referenceId: ''),
-      );
-      expect(response.statusCode, 200);
-      expect(
-        (await db.select(db.kDSOrders).get()).single.customerName,
-        'SQ: abc',
-      );
-    });
-
-    test('a long customer id is truncated for the label', () async {
-      final response = await postSquare(
-        squareOrder(customerId: 'cust-1234567890', referenceId: ''),
-      );
-      expect(response.statusCode, 200);
-      expect(
-        (await db.select(db.kDSOrders).get()).single.customerName,
-        'SQ: cust-',
-      );
-    });
-
-    test('a numeric quantity is accepted', () async {
-      final response = await postSquare(
-        squareOrder(
-          lineItems: [
-            {
-              'name': 'Burger',
-              'quantity': 3,
-              'base_price_money': {'amount': 950},
-            },
-          ],
-        ),
-      );
-      expect(response.statusCode, 200);
-      // One kitchen line per unit, matching the native intake path.
-      expect(await db.select(db.kDSItems).get(), hasLength(3));
-    });
-
-    test('overselling clamps tracked stock at zero', () async {
-      await db.into(db.menuItems).insert(
-            MenuItemsCompanion.insert(
-              guid: const Value('guid-burger'),
-              name: 'Burger',
-              category: 'Mains',
-              defaultStation: 'GRILL',
-              modifiers: const [],
-              trackStock: const Value(true),
-              stockQuantity: const Value(1),
-              updatedAtMs: Value(DateTime.now().millisecondsSinceEpoch),
-            ),
-          );
-
-      final response = await postSquare(
-        squareOrder(
-          lineItems: [
-            {
-              'name': 'Burger',
-              'quantity': '5',
-              'base_price_money': {'amount': 950},
-            },
-          ],
-        ),
-      );
-      expect(response.statusCode, 200);
-
-      final item = await db.select(db.menuItems).getSingle();
-      expect(
-        item.stockQuantity,
-        0,
-        reason: 'stock must not go negative and corrupt the low-stock view',
-      );
-    });
-
-    test('a redelivered webhook does not duplicate the ticket', () async {
-      expect((await postSquare(squareOrder())).statusCode, 200);
-      // Square retries on any non-2xx, so the same payload can arrive twice.
-      expect((await postSquare(squareOrder())).statusCode, 200);
-
-      expect(
-        await db.select(db.kDSOrders).get(),
-        hasLength(1),
-        reason: 'a retry must not fire a second copy at the kitchen',
-      );
-      expect(await db.select(db.kDSItems).get(), hasLength(1));
-    });
   });
 }
 
