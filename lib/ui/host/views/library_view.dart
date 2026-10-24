@@ -79,7 +79,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
         final initialTab = ref.watch(libraryTabIndexProvider);
 
         return DefaultTabController(
-          length: 4,
+          length: 5,
           initialIndex: initialTab,
           key: ValueKey('library_tab_$initialTab'),
           child: Column(
@@ -112,6 +112,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                   Tab(text: 'ITEMS'),
                   Tab(text: 'STATIONS'),
                   Tab(text: 'MODIFIERS'),
+                  Tab(text: 'COMBOS'),
                   Tab(text: 'BACKUP'),
                 ],
               ),
@@ -121,6 +122,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                     _buildItemsTab(store, theme, stations, effectiveStation),
                     _buildStationsTab(store, theme, stations),
                     _buildGlobalModifiersTab(store, theme),
+                    _buildCombosTab(store, theme, stations),
                     _buildBackupTab(store, theme),
                   ],
                 ),
@@ -850,6 +852,157 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
     );
   }
 
+  Widget _buildCombosTab(
+    HostStore store,
+    ThemeData theme,
+    List<StationData> stations,
+  ) {
+    return StreamBuilder<List<MenuItemData>>(
+      stream: store.watchMenuItems(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final allItems = snapshot.data!;
+        final combos = allItems.where((i) => i.isCombo).toList();
+        final regularItems = allItems.where((i) => !i.isCombo).toList();
+
+        return CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: theme.cardColor,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: theme.dividerColor),
+                  ),
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'NEW COMBO / MEAL DEAL',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 11,
+                          color: Color(0xFF666666),
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _ComboEditor(
+                        store: store,
+                        theme: theme,
+                        stations: stations,
+                        regularItems: regularItems,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Text(
+                  'COMBOS (${combos.length})',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                    color: theme.hintColor,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final combo = combos[index];
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: Material(
+                      color: theme.cardColor,
+                      borderRadius: BorderRadius.circular(8),
+                      clipBehavior: Clip.antiAlias,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: theme.dividerColor),
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          title: Row(
+                            children: [
+                              Text(
+                                combo.name.toUpperCase(),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 14,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                '\$${combo.price.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF2AA31F),
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 4.0),
+                            child: FutureBuilder<List<MenuItemData>>(
+                              future: store.getComboComponents(combo.id),
+                              builder: (context, snap) {
+                                if (!snap.hasData) return const SizedBox.shrink();
+                                final comps = snap.data!;
+                                return Text(
+                                  'Includes: ${comps.map((c) => c.name).join(' + ')}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: theme.hintColor,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.red,
+                              size: 20,
+                            ),
+                            onPressed: () => _confirmDelete(
+                              title: 'DELETE COMBO?',
+                              message: '"${combo.name}" will be removed. '
+                                  'This cannot be undone.',
+                              onConfirm: () => store.deleteCombo(combo.id),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }, childCount: combos.length),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildBackupTab(HostStore store, ThemeData theme) {
     return ListView(
       padding: const EdgeInsets.all(24),
@@ -1448,3 +1601,241 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
     );
   }
 }
+
+/// Combo editor widget for creating new combos.
+class _ComboEditor extends StatefulWidget {
+  final HostStore store;
+  final ThemeData theme;
+  final List<StationData> stations;
+  final List<MenuItemData> regularItems;
+
+  const _ComboEditor({
+    required this.store,
+    required this.theme,
+    required this.stations,
+    required this.regularItems,
+  });
+
+  @override
+  State<_ComboEditor> createState() => _ComboEditorState();
+}
+
+class _ComboEditorState extends State<_ComboEditor> {
+  final _nameController = TextEditingController();
+  final _priceController = TextEditingController();
+  String _category = 'All Items';
+  String? _selectedStation;
+  final Set<int> _selectedComponentIds = {};
+  final Map<int, int> _componentQuantities = {};
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _priceController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = widget.theme;
+    final effectiveStation = _selectedStation ??
+        (widget.stations.isNotEmpty ? widget.stations.first.name : null);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildField(_nameController, 'Combo Name', hint: 'e.g. Burger Combo'),
+        const SizedBox(height: 12),
+        _buildField(
+          _priceController,
+          'Combo Price',
+          hint: '0.00',
+          prefix: r'$',
+          keyboard: const TextInputType.numberWithOptions(decimal: true),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: effectiveStation,
+          decoration: _inputDecoration('Routing Station'),
+          items: widget.stations
+              .map(
+                (s) => DropdownMenuItem(
+                  value: s.name,
+                  child: Text(
+                    s.name,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: (val) => setState(() => _selectedStation = val),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'COMPONENTS',
+          style: TextStyle(
+            fontWeight: FontWeight.w900,
+            fontSize: 11,
+            color: Color(0xFF666666),
+            letterSpacing: 1.2,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...widget.regularItems.map((item) {
+          final isSelected = _selectedComponentIds.contains(item.id);
+          final qty = _componentQuantities[item.id] ?? 1;
+          return CheckboxListTile(
+            value: isSelected,
+            onChanged: (val) {
+              setState(() {
+                if (val == true) {
+                  _selectedComponentIds.add(item.id);
+                  _componentQuantities[item.id] = 1;
+                } else {
+                  _selectedComponentIds.remove(item.id);
+                  _componentQuantities.remove(item.id);
+                }
+              });
+            },
+            title: Text(
+              item.name.toUpperCase(),
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+            subtitle: Text(
+              '\$${item.price.toStringAsFixed(2)} • ${item.defaultStation}',
+              style: const TextStyle(fontSize: 10),
+            ),
+            secondary: isSelected
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.remove, size: 16),
+                        onPressed: qty > 1
+                            ? () => setState(
+                                () => _componentQuantities[item.id] = qty - 1,
+                              )
+                            : null,
+                      ),
+                      Text(
+                        '$qty',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add, size: 16),
+                        onPressed: () => setState(
+                          () => _componentQuantities[item.id] = qty + 1,
+                        ),
+                      ),
+                    ],
+                  )
+                : null,
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            activeColor: const Color(0xFF7C3AED),
+          );
+        }),
+        const SizedBox(height: 16),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF7C3AED),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6),
+            ),
+            elevation: 0,
+          ),
+          onPressed: _selectedComponentIds.isEmpty
+              ? null
+              : () async {
+                  final name = _nameController.text.trim();
+                  final price =
+                      double.tryParse(_priceController.text) ?? 0.0;
+                  if (name.isEmpty) return;
+                  final componentIds = _selectedComponentIds.toList();
+                  final componentQtys = componentIds
+                      .map((id) => _componentQuantities[id] ?? 1)
+                      .toList();
+                  await widget.store.saveCombo(
+                    name: name,
+                    price: price,
+                    category: _category,
+                    defaultStation: effectiveStation ?? 'Main Station',
+                    componentItemIds: componentIds,
+                    componentQuantities: componentQtys,
+                  );
+                  _nameController.clear();
+                  _priceController.clear();
+                  setState(() {
+                    _selectedComponentIds.clear();
+                    _componentQuantities.clear();
+                  });
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Combo saved!'),
+                        backgroundColor: Color(0xFF22C55E),
+                      ),
+                    );
+                  }
+                },
+          child: const Text(
+            'SAVE COMBO',
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  InputDecoration _inputDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(
+        fontWeight: FontWeight.w700,
+        fontSize: 13,
+        color: Color(0xFF666666),
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(6),
+        borderSide: BorderSide(color: widget.theme.dividerColor),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(6),
+        borderSide: BorderSide(color: widget.theme.dividerColor),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      isDense: true,
+    );
+  }
+
+  Widget _buildField(
+    TextEditingController controller,
+    String label, {
+    String? hint,
+    String? prefix,
+    TextInputType? keyboard,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboard,
+      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+      decoration: _inputDecoration(label).copyWith(hintText: hint, prefixText: prefix),
+    );
+  }
+}
+
+
+
+
+
+
+
+

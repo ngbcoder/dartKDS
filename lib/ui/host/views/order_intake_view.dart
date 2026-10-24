@@ -518,7 +518,30 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   const Spacer(),
-                                  if (item.oneTouch || item.tags.isNotEmpty)
+                                  if (item.isCombo)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 6),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF7C3AED),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Text(
+                                          'COMBO',
+                                          style: TextStyle(
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.w900,
+                                            color: Colors.white,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  else if (item.oneTouch || item.tags.isNotEmpty)
                                     Padding(
                                       padding: const EdgeInsets.only(bottom: 6),
                                       child: Text(
@@ -808,12 +831,51 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
                         contentPadding: EdgeInsets.zero,
                         visualDensity: VisualDensity.compact,
                         leading: const SizedBox.shrink(),
-                        title: Text(
-                          item.menuItem.name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                          ),
+                        title: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  item.menuItem.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                if (item.isCombo) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 1,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF7C3AED),
+                                      borderRadius: BorderRadius.circular(3),
+                                    ),
+                                    child: const Text(
+                                      'COMBO',
+                                      style: TextStyle(
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.w900,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            if (item.isCombo && item.comboComponents.isNotEmpty)
+                              Text(
+                                'Includes: ${item.comboComponents.map((c) => c.name).join(', ')}',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFF666666),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                          ],
                         ),
                         subtitle: item.selectedModifiers.isNotEmpty
                             ? Text(
@@ -1052,8 +1114,33 @@ class OrderIntakeViewState extends ConsumerState<OrderIntakeView> {
   }
 
   void _handleItemTap(BuildContext context, WidgetRef ref, MenuItemData item) {
+    final store = ref.read(hostStoreProvider);
     final hasModifiers =
         item.modifiers.isNotEmpty || item.requiredModifiers.isNotEmpty;
+
+    if (item.isCombo) {
+      // Fetch combo components and add as a combo item
+      store.getComboComponents(item.id).then((components) {
+        if (!context.mounted) return;
+        ref.read(intakeProvider.notifier).addItem(
+          item,
+          comboComponents: components,
+        );
+        HapticFeedback.lightImpact();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Added: ${item.name} (${components.length} items)',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            duration: const Duration(milliseconds: 800),
+            backgroundColor: const Color(0xFF111111),
+          ),
+        );
+      });
+      return;
+    }
+
     if (!hasModifiers || item.oneTouch) {
       ref.read(intakeProvider.notifier).addItem(item);
       HapticFeedback.lightImpact();

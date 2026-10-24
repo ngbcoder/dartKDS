@@ -60,6 +60,7 @@ class MenuItemDraft {
   final int stockQuantity;
   final bool trackStock;
   final bool oneTouch;
+  final bool isCombo;
 
   const MenuItemDraft({
     this.id,
@@ -74,6 +75,7 @@ class MenuItemDraft {
     required this.stockQuantity,
     required this.trackStock,
     required this.oneTouch,
+    this.isCombo = false,
   });
 
   Map<String, dynamic> toMap() => {
@@ -89,6 +91,7 @@ class MenuItemDraft {
     'stockQuantity': stockQuantity,
     'trackStock': trackStock,
     'oneTouch': oneTouch,
+    'isCombo': isCombo,
   };
 
   MenuItemsCompanion toCompanion(int nowMs) => MenuItemsCompanion(
@@ -103,6 +106,7 @@ class MenuItemDraft {
     stockQuantity: Value(stockQuantity),
     trackStock: Value(trackStock),
     oneTouch: Value(oneTouch),
+    isCombo: Value(isCombo),
     updatedAtMs: Value(nowMs),
   );
 }
@@ -145,6 +149,21 @@ abstract class HostStore {
   Future<void> deleteGlobalModifier(int id);
   Future<void> importLibrary(Map<String, dynamic> data);
   Future<void> clearLibrary();
+
+  // ── Combo writes ──────────────────────────────────────────────
+  Stream<List<MenuItemData>> watchCombos();
+  Future<List<MenuItemData>> getComboComponents(int comboId);
+  Future<void> saveCombo({
+    required String name,
+    required double price,
+    required String category,
+    required String defaultStation,
+    required List<int> componentItemIds,
+    required List<int> componentQuantities,
+  });
+  Future<void> deleteCombo(int id);
+  Future<void> addComboComponent(int comboId, int componentItemId, int quantity);
+  Future<void> removeComboComponent(int comboId, int componentItemId);
 
   // ── Order writes ──────────────────────────────────────────────
   /// Creates an order, or rewrites an existing one when [isEditing]. Handles
@@ -195,6 +214,7 @@ MenuItemData menuItemFromMap(Map<dynamic, dynamic> m) => MenuItemData(
   stockQuantity: (m['stockQuantity'] as num?)?.toInt() ?? 0,
   trackStock: m['trackStock'] == true,
   oneTouch: m['oneTouch'] == true,
+  isCombo: m['isCombo'] == true,
   updatedAtMs: (m['updatedAtMs'] as num?)?.toInt() ?? 0,
 );
 

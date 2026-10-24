@@ -30,6 +30,7 @@ void main() {
     stockQuantity: 20,
     trackStock: false,
     oneTouch: false,
+    isCombo: false,
     updatedAtMs: 0,
   );
 
@@ -306,4 +307,33 @@ class StubHostStore implements HostStore {
 
   @override
   void dispose() {}
+
+  @override
+  Stream<List<MenuItemData>> watchCombos() => Stream.value([]);
+
+  @override
+  Future<List<MenuItemData>> getComboComponents(int comboId) async => [];
+
+  @override
+  Future<void> saveCombo({
+    required String name,
+    required double price,
+    required String category,
+    required String defaultStation,
+    required List<int> componentItemIds,
+    required List<int> componentQuantities,
+  }) async {}
+
+  @override
+  Future<void> deleteCombo(int id) async {}
+
+  @override
+  Future<void> addComboComponent(
+    int comboId,
+    int componentItemId,
+    int quantity,
+  ) async {}
+
+  @override
+  Future<void> removeComboComponent(int comboId, int componentItemId) async {}
 }

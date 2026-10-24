@@ -5,18 +5,29 @@ class IntakeItem {
   final MenuItemData menuItem;
   final List<String> selectedModifiers;
   final int quantity;
+  final bool isCombo;
+  final List<MenuItemData> comboComponents;
 
   IntakeItem({
     required this.menuItem,
     this.selectedModifiers = const [],
     this.quantity = 1,
+    this.isCombo = false,
+    this.comboComponents = const [],
   });
 
-  IntakeItem copyWith({List<String>? selectedModifiers, int? quantity}) {
+  IntakeItem copyWith({
+    List<String>? selectedModifiers,
+    int? quantity,
+    bool? isCombo,
+    List<MenuItemData>? comboComponents,
+  }) {
     return IntakeItem(
       menuItem: menuItem,
       selectedModifiers: selectedModifiers ?? this.selectedModifiers,
       quantity: quantity ?? this.quantity,
+      isCombo: isCombo ?? this.isCombo,
+      comboComponents: comboComponents ?? this.comboComponents,
     );
   }
 }
@@ -53,9 +64,23 @@ class IntakeState {
 class IntakeNotifier extends StateNotifier<IntakeState> {
   IntakeNotifier() : super(IntakeState());
 
-  void addItem(MenuItemData item, {List<String> selectedModifiers = const [], int quantity = 1}) {
+  void addItem(
+    MenuItemData item, {
+    List<String> selectedModifiers = const [],
+    int quantity = 1,
+    List<MenuItemData> comboComponents = const [],
+  }) {
     state = state.copyWith(
-      items: [...state.items, IntakeItem(menuItem: item, selectedModifiers: selectedModifiers, quantity: quantity)],
+      items: [
+        ...state.items,
+        IntakeItem(
+          menuItem: item,
+          selectedModifiers: selectedModifiers,
+          quantity: quantity,
+          isCombo: item.isCombo,
+          comboComponents: comboComponents,
+        ),
+      ],
     );
   }
 

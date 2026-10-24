@@ -184,6 +184,7 @@ class RemoteHostStore implements HostStore {
               'stockQuantity': i.stockQuantity,
               'trackStock': i.trackStock,
               'oneTouch': i.oneTouch,
+              'isCombo': i.isCombo,
             },
           )
           .toList(),
@@ -244,6 +245,55 @@ class RemoteHostStore implements HostStore {
 
   @override
   Future<void> clearLibrary() async => client.clearLibrary();
+
+  @override
+  Stream<List<MenuItemData>> watchCombos() {
+    return _menuItems.map((items) => items.where((i) => i.isCombo).toList());
+  }
+
+  @override
+  Future<List<MenuItemData>> getComboComponents(int comboId) async {
+    // Components are stored on the host; the web client doesn't have direct
+    // access. Return empty for now — the host snapshot includes combo data
+    // via the menu items list.
+    return [];
+  }
+
+  @override
+  Future<void> saveCombo({
+    required String name,
+    required double price,
+    required String category,
+    required String defaultStation,
+    required List<int> componentItemIds,
+    required List<int> componentQuantities,
+  }) async {
+    client.saveCombo(
+      name: name,
+      price: price,
+      category: category,
+      defaultStation: defaultStation,
+      componentItemIds: componentItemIds,
+      componentQuantities: componentQuantities,
+    );
+  }
+
+  @override
+  Future<void> deleteCombo(int id) async => client.deleteCombo(id);
+
+  @override
+  Future<void> addComboComponent(
+    int comboId,
+    int componentItemId,
+    int quantity,
+  ) async {
+    // Not supported via web client bridge yet
+  }
+
+  @override
+  Future<void> removeComboComponent(int comboId, int componentItemId) async {
+    // Not supported via web client bridge yet
+  }
 
   // ── Order writes ──────────────────────────────────────────────
 

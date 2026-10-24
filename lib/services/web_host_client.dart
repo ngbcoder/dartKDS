@@ -392,6 +392,26 @@ class WebHostClient {
 
   void clearLibrary() => send({'type': 'ClearLibrary'});
 
+  void saveCombo({
+    required String name,
+    required double price,
+    required String category,
+    required String defaultStation,
+    required List<int> componentItemIds,
+    required List<int> componentQuantities,
+  }) =>
+      send({
+        'type': 'SaveCombo',
+        'name': name,
+        'price': price,
+        'category': category,
+        'defaultStation': defaultStation,
+        'componentItemIds': componentItemIds,
+        'componentQuantities': componentQuantities,
+      });
+
+  void deleteCombo(int id) => send({'type': 'DeleteCombo', 'id': id});
+
   void broadcastMessage(String message, {String? station}) => send({
     'type': 'BroadcastMessage',
     'message': message,

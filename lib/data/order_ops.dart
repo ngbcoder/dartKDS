@@ -91,47 +91,108 @@ Future<Map<String, dynamic>> _submitOrderInTransaction({
 
   final items = <Map<String, dynamic>>[];
   for (final line in lines) {
+    // Check if this line is a combo
+    MenuItemData? menuItem;
     if (line.menuItemId >= 0) {
-      final fresh = await (db.select(
+      menuItem = await (db.select(
         db.menuItems,
       )..where((t) => t.id.equals(line.menuItemId))).getSingleOrNull();
-      if (fresh != null && fresh.trackStock) {
+    }
+
+    if (menuItem != null && menuItem.isCombo) {
+      // Expand combo into individual component items
+      final components = await (db.select(db.comboComponents)
+            ..where((t) => t.comboItemId.equals(menuItem!.id)))
+          .get();
+
+      bool firstComponent = true;
+      for (final comp in components) {
+        final compItem = await (db.select(db.menuItems)
+              ..where((t) => t.id.equals(comp.componentItemId)))
+            .getSingleOrNull();
+        if (compItem == null) continue;
+
+        // Stock decrement for component
+        if (compItem.trackStock) {
+          await (db.update(
+            db.menuItems,
+          )..where((t) => t.id.equals(compItem.id))).write(
+            MenuItemsCompanion(
+              stockQuantity: drift.Value(
+                (compItem.stockQuantity - comp.quantity * line.quantity)
+                    .clamp(0, 1 << 31),
+              ),
+              updatedAtMs: drift.Value(nowMs),
+            ),
+          );
+        }
+
+        final compQty = comp.quantity * line.quantity;
+        for (var i = 0; i < compQty; i++) {
+          final itemUuid = const Uuid().v4();
+          // Assign combo price to first component only
+          final itemPrice = firstComponent ? line.price / line.quantity : 0.0;
+          firstComponent = false;
+
+          await db.into(db.kDSItems).insert(
+            KDSItemsCompanion.insert(
+              uuid: itemUuid,
+              orderUuid: orderUuid,
+              name: compItem.name,
+              modifiers: line.modifiers,
+              stationTag: compItem.defaultStation,
+              status: ItemStatus.pending,
+              price: drift.Value(itemPrice),
+              updatedAtMs: drift.Value(nowMs),
+            ),
+          );
+          items.add({
+            'uuid': itemUuid,
+            'name': compItem.name,
+            'modifiers': line.modifiers,
+            'stationTag': compItem.defaultStation,
+            'status': ItemStatus.pending.index,
+            'price': itemPrice,
+          });
+        }
+      }
+    } else {
+      // Regular item logic
+      if (line.menuItemId >= 0 && menuItem != null && menuItem.trackStock) {
         await (db.update(
           db.menuItems,
-        )..where((t) => t.id.equals(fresh.id))).write(
+        )..where((t) => t.id.equals(menuItem!.id))).write(
           MenuItemsCompanion(
-            // Clamp: a recall, a re-send or a hand-edited tab can otherwise
-            // drive tracked stock negative and the low-stock view goes wrong.
             stockQuantity: drift.Value(
-              (fresh.stockQuantity - line.quantity).clamp(0, 1 << 31),
+              (menuItem.stockQuantity - line.quantity).clamp(0, 1 << 31),
             ),
             updatedAtMs: drift.Value(nowMs),
           ),
         );
       }
-    }
-    for (var i = 0; i < line.quantity; i++) {
-      final itemUuid = const Uuid().v4();
-      await db.into(db.kDSItems).insert(
-        KDSItemsCompanion.insert(
-          uuid: itemUuid,
-          orderUuid: orderUuid,
-          name: line.name,
-          modifiers: line.modifiers,
-          stationTag: line.stationTag,
-          status: ItemStatus.pending,
-          price: drift.Value(line.price),
-          updatedAtMs: drift.Value(nowMs),
-        ),
-      );
-      items.add({
-        'uuid': itemUuid,
-        'name': line.name,
-        'modifiers': line.modifiers,
-        'stationTag': line.stationTag,
-        'status': ItemStatus.pending.index,
-        'price': line.price,
-      });
+      for (var i = 0; i < line.quantity; i++) {
+        final itemUuid = const Uuid().v4();
+        await db.into(db.kDSItems).insert(
+          KDSItemsCompanion.insert(
+            uuid: itemUuid,
+            orderUuid: orderUuid,
+            name: line.name,
+            modifiers: line.modifiers,
+            stationTag: line.stationTag,
+            status: ItemStatus.pending,
+            price: drift.Value(line.price),
+            updatedAtMs: drift.Value(nowMs),
+          ),
+        );
+        items.add({
+          'uuid': itemUuid,
+          'name': line.name,
+          'modifiers': line.modifiers,
+          'stationTag': line.stationTag,
+          'status': ItemStatus.pending.index,
+          'price': line.price,
+        });
+      }
     }
   }
 

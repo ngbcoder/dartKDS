@@ -481,6 +481,7 @@ class SentQueueView extends ConsumerWidget {
           stockQuantity: 0,
           trackStock: false,
           oneTouch: false,
+          isCombo: false,
           updatedAtMs: 0,
         ),
       );

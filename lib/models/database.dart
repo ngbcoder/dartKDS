@@ -41,6 +41,7 @@ class MenuItems extends Table {
   IntColumn get stockQuantity => integer().withDefault(const Constant(0))();
   BoolColumn get trackStock => boolean().withDefault(const Constant(false))();
   BoolColumn get oneTouch => boolean().withDefault(const Constant(false))();
+  BoolColumn get isCombo => boolean().withDefault(const Constant(false))();
   IntColumn get updatedAtMs => integer().withDefault(const Constant(0))();
 }
 
@@ -55,6 +56,17 @@ class Stations extends Table {
 class GlobalModifiers extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get name => text().withLength(min: 1, max: 100).unique()();
+  IntColumn get updatedAtMs => integer().withDefault(const Constant(0))();
+}
+
+@DataClassName('ComboComponentData')
+class ComboComponents extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  @ReferenceName('comboOwner')
+  IntColumn get comboItemId => integer().references(MenuItems, #id)();
+  @ReferenceName('comboComponent')
+  IntColumn get componentItemId => integer().references(MenuItems, #id)();
+  IntColumn get quantity => integer().withDefault(const Constant(1))();
   IntColumn get updatedAtMs => integer().withDefault(const Constant(0))();
 }
 
@@ -116,6 +128,7 @@ class NullableListStringConverter extends TypeConverter<List<String>, String?> {
     MenuItems,
     Stations,
     GlobalModifiers,
+    ComboComponents,
     SyncTombstones,
   ],
 )
@@ -127,7 +140,7 @@ class KDSDatabase extends _$KDSDatabase {
   KDSDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration {
@@ -256,6 +269,14 @@ class KDSDatabase extends _$KDSDatabase {
             // Nothing declares is_tab any more, so a database that predates
             // version 12 never had the column to begin with.
           }
+        }
+        if (from < 14) {
+          // Version 14: combo/meal deals — isCombo flag on menu items and
+          // ComboComponents linking table.
+          try {
+            await m.addColumn(menuItems, menuItems.isCombo);
+          } catch (e) {}
+          await m.createTable(comboComponents);
         }
       },
     );

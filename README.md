@@ -25,6 +25,7 @@ DartKDS is a lightweight, self-hosted **Kitchen Display System (KDS)** designed 
 - 📱 **Flexible Roles** — Turn any tablet or phone into a Primary Host (Intake) or a Kitchen Display (Client).
 - 🔌 **Instant Pairing** — Connect new screens in seconds via **QR Code Scanning**.
 - 🔍 **Smart Routing** — Orders automatically route to specific stations (Grill, Fryer, Bar, etc.) based on your menu configuration.
+- 🍔 **Combo/Meal Deals** — Bundle menu items into combos with special pricing. Combos expand into individual kitchen tickets per component, each routed to its station.
 - 📊 **Insightful Analytics** — Track item popularity and modifier frequency (e.g., "Which burger toppings are trending?").
 - 🌐 **Browser Support** — Access the kitchen view from any device with a web browser.
 - 💾 **Local Resilience** — Orders are stored on-device using a high-performance SQLite database.

@@ -111,6 +111,7 @@ class DriftHostStore implements HostStore {
               'stockQuantity': i.stockQuantity,
               'trackStock': i.trackStock,
               'oneTouch': i.oneTouch,
+              'isCombo': i.isCombo,
             },
           )
           .toList(),
@@ -147,6 +148,7 @@ class DriftHostStore implements HostStore {
           stockQuantity: drift.Value(draft.stockQuantity),
           trackStock: drift.Value(draft.trackStock),
           oneTouch: drift.Value(draft.oneTouch),
+          isCombo: drift.Value(draft.isCombo),
           updatedAtMs: drift.Value(nowMs),
         ),
       );
@@ -166,6 +168,7 @@ class DriftHostStore implements HostStore {
           stockQuantity: drift.Value(draft.stockQuantity),
           trackStock: drift.Value(draft.trackStock),
           oneTouch: drift.Value(draft.oneTouch),
+          isCombo: drift.Value(draft.isCombo),
           updatedAtMs: drift.Value(nowMs),
         ),
       );
@@ -176,6 +179,106 @@ class DriftHostStore implements HostStore {
   Future<void> deleteMenuItem(int id) =>
       (db.delete(db.menuItems)..where((t) => t.id.equals(id))).go();
 
+  @override
+  Stream<List<MenuItemData>> watchCombos() => (db.select(db.menuItems)
+        ..where((t) => t.isCombo.equals(true)))
+      .watch();
+
+  @override
+  Future<List<MenuItemData>> getComboComponents(int comboId) async {
+    final components = await (db.select(db.comboComponents)
+          ..where((t) => t.comboItemId.equals(comboId)))
+        .get();
+    final result = <MenuItemData>[];
+    for (final comp in components) {
+      final item = await (db.select(db.menuItems)
+            ..where((t) => t.id.equals(comp.componentItemId)))
+          .getSingleOrNull();
+      if (item != null) result.add(item);
+    }
+    return result;
+  }
+
+  @override
+  Future<void> saveCombo({
+    required String name,
+    required double price,
+    required String category,
+    required String defaultStation,
+    required List<int> componentItemIds,
+    required List<int> componentQuantities,
+  }) async {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    await db.transaction(() async {
+      // Create the combo as a menu item with isCombo=true
+      final comboId = await db.into(db.menuItems).insert(
+        MenuItemsCompanion.insert(
+          guid: drift.Value(const Uuid().v4()),
+          name: name,
+          category: category,
+          defaultStation: defaultStation,
+          modifiers: const <String>[],
+          requiredModifiers: const drift.Value(<String>[]),
+          tags: const drift.Value(<String>[]),
+          price: drift.Value(price),
+          stockQuantity: const drift.Value(0),
+          trackStock: const drift.Value(false),
+          oneTouch: const drift.Value(false),
+          isCombo: const drift.Value(true),
+          updatedAtMs: drift.Value(nowMs),
+        ),
+      );
+      // Add components
+      for (var i = 0; i < componentItemIds.length; i++) {
+        await db.into(db.comboComponents).insert(
+          ComboComponentsCompanion.insert(
+            comboItemId: comboId,
+            componentItemId: componentItemIds[i],
+            quantity: drift.Value(
+              i < componentQuantities.length ? componentQuantities[i] : 1,
+            ),
+            updatedAtMs: drift.Value(nowMs),
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  Future<void> deleteCombo(int id) async {
+    await db.transaction(() async {
+      await (db.delete(db.comboComponents)
+            ..where((t) => t.comboItemId.equals(id)))
+          .go();
+      await (db.delete(db.menuItems)..where((t) => t.id.equals(id))).go();
+    });
+  }
+
+  @override
+  Future<void> addComboComponent(
+    int comboId,
+    int componentItemId,
+    int quantity,
+  ) async {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    await db.into(db.comboComponents).insert(
+      ComboComponentsCompanion.insert(
+        comboItemId: comboId,
+        componentItemId: componentItemId,
+        quantity: drift.Value(quantity),
+        updatedAtMs: drift.Value(nowMs),
+      ),
+    );
+  }
+
+  @override
+  Future<void> removeComboComponent(int comboId, int componentItemId) async {
+    await (db.delete(db.comboComponents)
+          ..where((t) =>
+              t.comboItemId.equals(comboId) &
+              t.componentItemId.equals(componentItemId)))
+        .go();
+  }
   @override
   Future<void> setStock(int id, int quantity) =>
       (db.update(db.menuItems)..where((t) => t.id.equals(id))).write(
@@ -298,6 +401,7 @@ class DriftHostStore implements HostStore {
           stockQuantity: drift.Value((i['stockQuantity'] as num?)?.toInt() ?? 0),
           trackStock: drift.Value(i['trackStock'] == true),
           oneTouch: drift.Value(i['oneTouch'] == true),
+          isCombo: drift.Value(i['isCombo'] == true),
           updatedAtMs: drift.Value(nowMs),
         );
         final existing = existingItems

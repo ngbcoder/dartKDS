@@ -1173,6 +1173,68 @@ class HostServer {
                   )..where((t) => t.id.equals(menuId))).go();
                   _notifyWebHostDebounced();
                 }
+              } else if (data['type'] == 'SaveCombo') {
+                final name = (data['name'] ?? '').toString().trim();
+                final price = (data['price'] as num?)?.toDouble() ?? 0.0;
+                final category = (data['category'] ?? 'All Items').toString();
+                final defaultStation =
+                    (data['defaultStation'] ?? 'Main Station').toString();
+                final componentIds = (data['componentItemIds'] as List?)
+                        ?.map((e) => (e as num).toInt())
+                        .toList() ??
+                    [];
+                final componentQtys = (data['componentQuantities'] as List?)
+                        ?.map((e) => (e as num).toInt())
+                        .toList() ??
+                    [];
+                if (name.isNotEmpty && componentIds.isNotEmpty) {
+                  final now = DateTime.now().millisecondsSinceEpoch;
+                  await _db!.transaction(() async {
+                    final comboId = await _db!.into(_db!.menuItems).insert(
+                      MenuItemsCompanion.insert(
+                        guid: drift.Value(const Uuid().v4()),
+                        name: name,
+                        category: category,
+                        defaultStation: defaultStation,
+                        modifiers: const <String>[],
+                        requiredModifiers: const drift.Value(<String>[]),
+                        tags: const drift.Value(<String>[]),
+                        price: drift.Value(price),
+                        stockQuantity: const drift.Value(0),
+                        trackStock: const drift.Value(false),
+                        oneTouch: const drift.Value(false),
+                        isCombo: const drift.Value(true),
+                        updatedAtMs: drift.Value(now),
+                      ),
+                    );
+                    for (var i = 0; i < componentIds.length; i++) {
+                      await _db!.into(_db!.comboComponents).insert(
+                        ComboComponentsCompanion.insert(
+                          comboItemId: comboId,
+                          componentItemId: componentIds[i],
+                          quantity: drift.Value(
+                            i < componentQtys.length ? componentQtys[i] : 1,
+                          ),
+                          updatedAtMs: drift.Value(now),
+                        ),
+                      );
+                    }
+                  });
+                  _notifyWebHostDebounced();
+                }
+              } else if (data['type'] == 'DeleteCombo') {
+                final comboId = (data['id'] as num?)?.toInt();
+                if (comboId != null) {
+                  await _db!.transaction(() async {
+                    await (_db!.delete(_db!.comboComponents)
+                          ..where((t) => t.comboItemId.equals(comboId)))
+                        .go();
+                    await (_db!.delete(_db!.menuItems)
+                          ..where((t) => t.id.equals(comboId)))
+                        .go();
+                  });
+                  _notifyWebHostDebounced();
+                }
               } else if (data['type'] == 'SaveStation' ||
                   data['type'] == 'SaveStationItem') {
                 final station = data['type'] == 'SaveStationItem'
